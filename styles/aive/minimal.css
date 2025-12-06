@@ -1,0 +1,117 @@
+/* Minimal AIVE CSS - editable */
+
+#aive-minimal-root {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 999999;
+    font-family: Arial, sans-serif;
+    color: #e6f9f9;
+}
+
+#aive-minimal-root .aive-panel {
+    background: linear-gradient(180deg, #0d0d0d, #141414);
+    border: 1px solid rgba(0, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 12px;
+    width: 260px;
+    max-height: 420px;
+    overflow: auto;
+    color: #e6f9f9;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    display: block;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+#aive-minimal-root .aive-title {
+    font-weight: 700;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #f0e890;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#aive-minimal-root .aive-row {
+    margin: 10px 0;
+    filter: brightness(0.6);
+}
+
+#aive-minimal-root .aive-row:hover {
+    filter: brightness(1);
+}
+
+#aive-minimal-root .aive-row:hover .aive-value {
+    color: #ffff00 !important;
+}
+
+#aive-minimal-root .aive-row:hover .aive-label {
+    color: #ffff00 !important;
+}
+
+#aive-minimal-root .aive-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: rgb(231, 235, 48);
+}
+
+#aive-minimal-root .aive-slider {
+    width: 100%;
+    accent-color: #ff0000;
+    background: transparent;
+}
+
+#aive-minimal-root .aive-value {
+    font-weight: 600;
+    margin-left: 6px;
+    color: rgb(215, 238, 10);
+}
+
+#aive-minimal-root .aive-reset {
+    width: 100%;
+    padding: 8px;
+    margin-top: 8px;
+    background: #00ffd5;
+    color: #002;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+#aive-minimal-root .aive-reset:hover {
+    opacity: 0.95;
+    transform: translateY(-1px);
+}
+
+#aive-minimal-root.aive-hidden .aive-panel {
+    opacity: 0;
+    transform: translateY(6px);
+    pointer-events: none;
+}
+
+#aive-minimal-root .aive-toggle {
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: none;
+    background: rgba(255, 255, 255, 0.04);
+    color: #dff;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+#aive-minimal-root .aive-toggle.active {
+    background: #00ffd5;
+    color: #002;
+}
+
+#aive-minimal-root .aive-toggle[style] {
+    flex: 1;
+}
+
+#aive-minimal-root .aive-panel .footer {
+    margin-top: 10px;
+}

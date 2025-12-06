@@ -1,0 +1,153 @@
+/* backup of styles/aive/content.css */
+/* Layout: sizes and positions */
+
+:host, .aive-root {
+  all: initial;
+}
+
+.aive-root {
+  inset: auto auto 1rem 1rem;
+  position: fixed;
+  z-index: 2147483647;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  color: #ffffff;
+  display: block !important;
+  visibility: visible !important;
+}
+
+.aive-panel {
+  border-radius: 1rem;
+  min-width: 22rem;
+  max-width: none;
+  user-select: none;
+  background: #000000;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 .5rem 1.5rem #000000;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+.aive-header {
+  align-items: center;
+  cursor: move;
+  display: flex;
+  font-size: 1rem;
+  font-weight: 700;
+  justify-content: space-between;
+  letter-spacing: .25px;
+  padding: .75rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.aive-title {
+  align-items: center;
+  display: flex;
+  gap: .5rem;
+}
+
+.aive-btn {
+  border-radius: .6rem;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: .95rem;
+  line-height: 1.2;
+  padding: .5rem .75rem;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background: #000000;
+  color: #ffffff;
+}
+
+.aive-body {
+  display: grid;
+  gap: .55rem;
+  grid-template-columns: 1fr;
+  padding: .75rem 1rem 1rem;
+}
+
+.aive-row { 
+  align-items: center;
+  display: grid;
+  gap: .6rem;
+  grid-template-columns: 8rem 1fr 4rem;
+}
+
+.aive-row label { 
+  font-size: .9rem;
+  color: #cfcfcf;
+}
+
+.aive-row input[type="range"] {
+  width: 100%;
+}
+
+.aive-row output {
+  font-size: .85rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: #b5b5b5;
+}
+
+.aive-footer {
+  display:flex;
+  gap:.5rem;
+  padding: .5rem 1rem 1rem;
+}
+
+/* .aive-toggle button removed per user request */
+
+.aive-hidden {
+  display: none !important;
+}
+
+/* Wrapper for zoom & pan */
+.aive-wrap { 
+  display: inline-block;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Large slider handle for easy grabbing */
+.aive-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  border-radius: 9px;
+  height: 18px;
+  width: 18px;
+}
+
+.aive-row input[type="range"]::-moz-range-thumb { 
+border-radius: 9px;
+border: 0; 
+height: 18px;
+width: 18px; 
+}
+
+/* Mirror row alignment: LEDs on the right */
+.aive-row--mirror {
+  grid-template-columns: 8rem auto 1fr;
+}
+
+.aive-mirror {
+  align-items: center;
+  display: inline-flex;
+  gap: 1.25rem;
+  justify-self: start;
+}
+
+.aive-mirror-item {
+  align-items: center;
+  display: inline-flex;
+  gap: .4rem;
+}
+
+.aive-mirror-letter {
+  font-size: .95rem;
+  font-weight: 700;
+  text-align: right;
+  width: 1ch;
+}

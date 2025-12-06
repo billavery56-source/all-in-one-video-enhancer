@@ -1,0 +1,260 @@
+:root,
+.aive-root {
+  all: initial;
+}
+.aive-root {
+  color: #eaeaea;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    sans-serif;
+  inset: auto auto 1rem 1rem;
+  position: fixed;
+  z-index: 2147483647;
+  overscroll-behavior: contain;
+}
+.aive-panel {
+  background: #1e1f22;
+  border: 1px solid #2a2b2f;
+  border-radius: 1rem;
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.55);
+  min-width: 0;
+  max-width: none;
+  user-select: none;
+  transition: opacity 0.25s ease;
+}
+.aive-panel.aive-faded {
+  opacity: .05;
+}
+.aive-header {
+  align-items: center;
+  background: #26272b;
+  border-bottom: 1px solid #2a2b2f;
+  cursor: move;
+  display: flex;
+  font-size: 1.5rem;
+  font-weight: 700;
+  justify-content: space-between;
+  letter-spacing: 0.25px;
+  padding: 0.8rem 1rem;
+  border-top-left-radius: 1rem;
+  border-top-right-radius: 1rem;
+}
+.aive-title {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.aive-btn {
+  border-radius: 22px;
+  border: none;
+  color: #fff;
+  position: relative;
+  z-index: 1;
+  opacity: 1;
+  padding: 0.45rem 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: inset 0 0 5px #0006, #9b9b9b 0 1px 0, 10px 10px 5px #0a0a0a66,
+    #9b9b9b 0 1px 0;
+  background: radial-gradient(circle, #058db7a8 0%, #000 100%);
+  transition: color 0.15s linear, box-shadow 0.25s ease, transform 0.25s ease;
+}
+.aive-btn::before {
+  border-radius: 22px;
+  bottom: 0;
+  content: "";
+  left: 0;
+  right: 0;
+  top: 0;
+  position: absolute;
+  opacity: 0;
+  transition: opacity 0.8s linear;
+  z-index: -1;
+  background: radial-gradient(circle, #000 0%, #058db7 100%);
+}
+.aive-btn:hover {
+  color: #ff0;
+}
+.aive-btn:hover::before {
+  opacity: 1;
+}
+#aive-reset,
+#aive-close {
+  background: radial-gradient(circle, #d90008a8 0%, #000 100%);
+}
+#aive-reset::before,
+#aive-close::before {
+  background: radial-gradient(circle, #000 0%, #d90008 100%);
+}
+#aive-show {
+  background: radial-gradient(circle, #05b717a8 0%, #000 100%);
+}
+#aive-show::before {
+  background: radial-gradient(circle, #000 0%, #05b717 100%);
+}
+.aive-header > div:last-child {
+  margin-left: 0.6rem;
+}
+#aive-fullscreen:hover {
+  box-shadow: 0 0 12px rgba(0, 255, 255, 0.75),
+    inset 0 0 5px rgba(0, 0, 0, 0.38), inset 0 0 5px #0006, #9b9b9b 0 1px 0,
+    10px 10px 5px #0a0a0a66, #9b9b9b 0 1px 0;
+  transform: translateY(-1px);
+}
+#aive-close:hover {
+  box-shadow: 0 0 12px rgba(255, 0, 0, 0.75), inset 0 0 5px rgba(0, 0, 0, 0.38),
+    inset 0 0 5px #0006, #9b9b9b 0 1px 0, 10px 10px 5px #0a0a0a66,
+    #9b9b9b 0 1px 0;
+  transform: translateY(-1px);
+}
+.aive-toggle {
+  border: none;
+  border-radius: 999px;
+  bottom: 1rem;
+  position: fixed;
+  right: 1rem;
+  z-index: 2147483646;
+}
+.aive-toggle:hover {
+  box-shadow: 0 0 12px rgba(0, 180, 255, 0.65),
+    0 0.5rem 1.5rem rgba(0, 0, 0, 0.35);
+  transform: translateY(-1px);
+}
+.aive-body {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: 1fr;
+  padding: 0.75rem 1rem 1rem;
+}
+.aive-row {
+  display: grid;
+  align-items: center;
+  gap: 0.6rem;
+  grid-template-columns: 9rem 1fr 4rem;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.aive-row label {
+  color: #d5d7dc;
+  font-size: 1rem;
+}
+.aive-row input[type="range"] {
+  width: 100%;
+}
+.aive-row output {
+  color: #bfc2c8;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.aive-row:has(input[type="range"]) input[type="range"] {
+  filter: brightness(75%);
+  transition: filter 0.2s ease;
+}
+.aive-row:has(input[type="range"]):hover input[type="range"] {
+  filter: brightness(100%);
+}
+.aive-row:has(input[type="range"]):hover > label,
+.aive-row:has(input[type="range"]):hover > output {
+  color: #ff0 !important;
+}
+.aive-row--mirror {
+  grid-template-columns: 9rem auto 4rem;
+}
+.aive-mirror {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+.aive-mirror-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.aive-mirror-letter {
+  color: #d5d7dc;
+  font-weight: 700;
+  font-size: 0.95rem;
+  width: 1ch;
+  text-align: right;
+}
+.aive-light {
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  cursor: pointer;
+  transform: translateZ(0);
+}
+.aive-light.aive-on {
+  background-image: radial-gradient(
+      35% 35% at 35% 35%,
+      rgba(255, 255, 255, 0.7),
+      rgba(255, 255, 255, 0) 60%
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      #3dff3d 0%,
+      #19c819 45%,
+      #078a07 70%,
+      #045f04 100%
+    );
+  box-shadow: 0 0 10px rgba(0, 255, 0, 0.55),
+    inset 0 0 4px rgba(255, 255, 255, 0.2);
+}
+.aive-light.aive-off {
+  background-image: radial-gradient(
+      35% 35% at 35% 35%,
+      rgba(255, 255, 255, 0.35),
+      rgba(255, 255, 255, 0) 60%
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      #ff6060 0%,
+      #c81a1a 45%,
+      #8a0707 70%,
+      #5f0404 100%
+    );
+  box-shadow: 0 0 6px rgba(255, 0, 0, 0.35),
+    inset 0 0 3px rgba(255, 255, 255, 0.15);
+}
+.aive-light:hover {
+  transform: scale(1.06);
+}
+.aive-footer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 1rem;
+}
+.aive-hidden {
+  display: none !important;
+}
+.aive-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  background: #fff;
+  border-radius: 9px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  height: 18px;
+  width: 18px;
+}
+.aive-row input[type="range"]::-moz-range-thumb {
+  background: #fff;
+  border-radius: 9px;
+  border: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  height: 18px;
+  width: 18px;
+}
+#aive-disable-site {
+  background: radial-gradient(circle, #d90008a8 0%, #000 100%);
+}
+#aive-disable-site::before {
+  background: radial-gradient(circle, #000 0%, #d90008 100%);
+}
+#aive-manage-blacklist {
+  background: radial-gradient(circle, #797979a8 0%, #000 100%);
+}
+#aive-manage-blacklist::before {
+  background: radial-gradient(circle, #000 0%, #797979 100%);
+}

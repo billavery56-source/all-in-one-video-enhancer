@@ -1,0 +1,35 @@
+/* backup of styles/aive/fonts.css */
+/* Font family and text colors with fallbacks */
+
+.aive-root {
+  color: var(--aive-color-text, #ffffff);
+  font-family: var(--aive-font, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif);
+}
+
+.aive-row:hover output {
+  color: var(--aive-color-highlight, #fbff00) !important;
+}
+
+.aive-btn {
+  color: var(--aive-color-btn-text, #ffffff) !important;
+}
+
+.aive-btn:hover {
+  color: var(--aive-color-highlight, #fbff00) !important;
+}
+
+.aive-toggle { 
+  color: var(--aive-color-btn-text, #ffffff) !important;
+}
+
+.aive-row label { 
+  color: var(--aive-color-label, #cfcfcf);
+}
+
+.aive-row output { 
+  color: var(--aive-color-text-muted, #b5b5b5);
+}
+
+.aive-mirror-letter { 
+  color: var(--aive-color-mirror-letter, #d5d7dc); 
+}
