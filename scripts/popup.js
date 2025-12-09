@@ -1,100 +1,124 @@
-// popup.js
-// Ensure the content script and CSS are injected even if the site access is "on click".
-async function getActiveTab() {
+// popup.js for All-in-One Video Enhancer (AIVE)
+
+function getCurrentTab() {
   return new Promise((resolve) => {
-    try {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        resolve((tabs && tabs[0]) || null);
-      });
-    } catch {
-      resolve(null);
-    }
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      resolve((tabs && tabs[0]) || null);
+    });
   });
 }
 
-async function requestOriginPermission(url) {
+function getHostname(url) {
   try {
-    const u = new URL(url);
-    const origin = `${u.protocol}//${u.hostname}`;
-    const pattern = origin + "/*";
-    const has = await chrome.permissions.contains({ origins: [pattern] });
-    if (has) return true;
-    return await chrome.permissions.request({ origins: [pattern] });
+    return new URL(url).hostname.toLowerCase();
   } catch {
-    return false;
+    return null;
   }
 }
 
-async function getAllFrames(tabId) {
+function loadBlacklist() {
   return new Promise((resolve) => {
+    chrome.storage.local.get(["aive-blacklist-v1"], (res) => {
+      const list = res["aive-blacklist-v1"];
+      resolve(Array.isArray(list) ? list : []);
+    });
+  });
+}
+
+function saveBlacklist(list) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ "aive-blacklist-v1": list }, resolve);
+  });
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  const siteLine = document.getElementById("site-line");
+  const statusEl = document.getElementById("status");
+  const pauseBtn = document.getElementById("pause-btn");
+  const disableBtn = document.getElementById("disable-btn");
+  const enableBtn = document.getElementById("enable-btn");
+  const helpBtn = document.getElementById("help-btn");
+  const helpPanel = document.getElementById("help-panel");
+
+  // Help toggle
+  if (helpBtn && helpPanel) {
+    helpBtn.addEventListener("click", () => {
+      const visible = helpPanel.style.display === "block";
+      helpPanel.style.display = visible ? "none" : "block";
+    });
+  }
+
+  const tab = await getCurrentTab();
+  if (!tab || !tab.url) {
+    siteLine.textContent = "Site: (no active tab)";
+    pauseBtn.disabled = true;
+    disableBtn.disabled = true;
+    enableBtn.disabled = true;
+    statusEl.textContent = "";
+    return;
+  }
+
+  const host = getHostname(tab.url);
+  if (!host) {
+    siteLine.textContent = "Site: (unknown)";
+  } else {
+    siteLine.textContent = `Site: ${host}`;
+  }
+
+  let blacklist = await loadBlacklist();
+
+  function updateSiteStatus() {
+    if (!host) {
+      statusEl.textContent = "";
+      disableBtn.disabled = true;
+      enableBtn.disabled = true;
+      return;
+    }
+    const blocked = blacklist.includes(host);
+    disableBtn.disabled = blocked;
+    enableBtn.disabled = !blocked;
+    statusEl.textContent = blocked
+      ? "AIVE is currently disabled on this site."
+      : "AIVE is enabled on this site.";
+  }
+
+  updateSiteStatus();
+
+  // Temporarily pause / resume AIVE on this tab
+  pauseBtn.addEventListener("click", async () => {
+    if (!tab || !tab.id) return;
     try {
-      chrome.webNavigation.getAllFrames({ tabId }, (frames) => resolve(frames || []));
-    } catch {
-      resolve([]);
+      await chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_SLEEP" });
+      statusEl.textContent = "Toggled AIVE pause for this tab.";
+    } catch (e) {
+      statusEl.textContent = "AIVE is not active on this page.";
     }
   });
-}
 
-async function injectIntoTab(tabId, url) {
-  // Try to inject into all frames; request per-origin rights where needed
-  const frames = await getAllFrames(tabId);
-  const frameIds = frames.map((f) => f.frameId).filter((id) => typeof id === 'number');
-  const origins = Array.from(new Set(
-    frames
-      .map((f) => {
-        try { const u = new URL(f.url); return `${u.protocol}//${u.hostname}`; } catch { return null; }
-      })
-      .filter(Boolean)
-  ));
-  // Request access for frame origins (optional)
-  for (const origin of origins) {
-    try { await chrome.permissions.request({ origins: [origin + '/*'] }); } catch {}
-  }
-  // Inject minimal CSS and content script
-  try { await chrome.scripting.insertCSS({ target: { tabId }, files: ["styles/aive/minimal.css"] }); } catch {}
-  try { await chrome.scripting.executeScript({ target: { tabId }, files: ["scripts/content-minimal.js"] }); } catch {}
-  // Then target known frames for stubborn players
-  for (const fid of frameIds) {
-    try { await chrome.scripting.insertCSS({ target: { tabId, frameIds: [fid] }, files: ["styles/aive/minimal.css"] }); } catch {}
-    try { await chrome.scripting.executeScript({ target: { tabId, frameIds: [fid] }, files: ["scripts/content-minimal.js"] }); } catch {}
-  }
-}
+  // Permanently disable AIVE on this site (blacklist)
+  disableBtn.addEventListener("click", async () => {
+    if (!host) return;
+    blacklist = await loadBlacklist();
+    if (!blacklist.includes(host)) {
+      blacklist.push(host);
+      await saveBlacklist(blacklist);
+    }
+    updateSiteStatus();
 
-async function ensureInjected() {
-  const tab = await getActiveTab();
-  if (!tab || !tab.id) return;
-  // Try to request origin permission for reliability; even if denied, activeTab lets us inject in the main page
-  if (tab.url) await requestOriginPermission(tab.url);
-  await injectIntoTab(tab.id, tab.url || "");
-  // Force panel to appear (do not toggle to avoid hiding if already visible)
-  try { await chrome.tabs.sendMessage(tab.id, { type: "FORCE_SHOW" }); } catch {}
-}
-
-// Messaging helpers
-async function sendToActiveTab(message) {
-  try {
-    const tab = await getActiveTab();
+    // Optionally also pause effects on the current tab
     if (tab && tab.id) {
-      try { await chrome.tabs.sendMessage(tab.id, message); } catch {}
+      try {
+        await chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_SLEEP" });
+      } catch {}
     }
-  } catch {}
-}
-
-// Wire UI
-document.addEventListener("DOMContentLoaded", () => {
-  // Auto-inject when popup opens
-  ensureInjected();
-
-  document.getElementById("resetAll")?.addEventListener("click", () => {
-    sendToActiveTab({ type: "RESET_ALL" });
   });
 
-  document.addEventListener("keydown", (e) => {
-    const k = (e.key || "").toLowerCase();
-    if (k === "h" && !e.shiftKey) sendToActiveTab({ type: "MIRROR_H" });
-    if (k === "h" && e.shiftKey) sendToActiveTab({ type: "RESET_MIRROR_H" });
-    if (k === "v" && !e.shiftKey) sendToActiveTab({ type: "MIRROR_V" });
-    if (k === "v" && e.shiftKey) sendToActiveTab({ type: "RESET_MIRROR_V" });
-    if (k === "r") sendToActiveTab({ type: "RESET_ALL" });
+  // Re-enable AIVE for this site (remove from blacklist)
+  enableBtn.addEventListener("click", async () => {
+    if (!host) return;
+    blacklist = await loadBlacklist();
+    blacklist = blacklist.filter((h) => h !== host);
+    await saveBlacklist(blacklist);
+    updateSiteStatus();
   });
 });

@@ -1,26 +1,138 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Video Enhancer</title>
-    <link rel="stylesheet" href="styles/style.css" />
-    <style>
-      /* Keep popup compact */
-      body { margin: 0; padding: 0.5rem; background: #1e1f22; color: #eaeaea; min-width: 240px; }
-      .row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-    </style>
-  </head>
-  <body>
-    <div class="row" style="margin-bottom:.5rem;">
-      <strong>Video Enhancer</strong>
-    </div>
-    <div class="row" style="margin-bottom:.5rem;">
-      <button class="popup-btn" id="resetAll">Reset All (R)</button>
-    </div>
-    <div style="opacity:.75; font-size:.85rem; line-height:1.2;">
-      Tips: use V to toggle panel, H/V to mirror, R to reset.
-    </div>
-    <script src="scripts/popup.js"></script>
-  </body>
-  </html>
+<head>
+  <meta charset="UTF-8" />
+  <title>All-in-One Video Enhancer</title>
+  <style>
+    body {
+      margin: 10px;
+      width: 260px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #050607;
+      color: #e6f9f9;
+    }
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 14px;
+      letter-spacing: 0.08em;
+      color: #f0e890;
+    }
+    #help-btn {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 255, 255, 0.4);
+      background: #11141a;
+      color: #e6f9f9;
+      font-size: 13px;
+      padding: 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #help-btn:hover {
+      background: rgba(0, 255, 255, 0.14);
+    }
+    #site-line {
+      font-size: 11px;
+      margin-bottom: 6px;
+      opacity: 0.85;
+      text-align: center;
+    }
+    button {
+      width: 100%;
+      padding: 7px 8px;
+      margin-top: 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(0, 255, 255, 0.25);
+      background: #101114;
+      color: #e6f9f9;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.1s ease;
+    }
+    button:hover:not(:disabled) {
+      background: rgba(0, 255, 255, 0.12);
+      transform: translateY(-1px);
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    #pause-btn {
+      border-color: rgba(255, 193, 7, 0.7);
+    }
+    #disable-btn {
+      border-color: rgba(255, 82, 82, 0.7);
+    }
+    #enable-btn {
+      border-color: rgba(102, 187, 106, 0.7);
+    }
+    #status {
+      margin-top: 8px;
+      font-size: 11px;
+      opacity: 0.8;
+      text-align: center;
+    }
+    #help-panel {
+      margin-top: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: rgba(10, 14, 20, 0.95);
+      border: 1px solid rgba(0, 255, 255, 0.18);
+      font-size: 11px;
+      line-height: 1.35;
+      display: none;
+    }
+    #help-panel strong {
+      color: #f0e890;
+    }
+    #help-panel ul {
+      padding-left: 18px;
+      margin: 4px 0 0;
+    }
+    #help-panel li {
+      margin: 2px 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>AIVE</h1>
+    <button id="help-btn" title="How AIVE works">?</button>
+  </div>
+
+  <div id="site-line">Site: (loading…)</div>
+
+  <button id="pause-btn">Pause AIVE on this tab</button>
+  <button id="disable-btn">Disable AIVE on this site</button>
+  <button id="enable-btn">Enable AIVE on this site</button>
+
+  <div id="status"></div>
+
+  <div id="help-panel">
+    <strong>Pin AIVE to the toolbar</strong>
+    <ul>
+      <li>Click the puzzle-piece icon (Extensions) in the toolbar.</li>
+      <li>Find “All-in-One Video Enhancer (AIVE)”.</li>
+      <li>Click the pin icon so AIVE stays visible.</li>
+    </ul>
+    <br />
+    <strong>What these buttons do</strong>
+    <ul>
+      <li><b>Pause AIVE on this tab</b> – temporarily turns AIVE’s effects on/off for the current tab only.</li>
+      <li><b>Disable AIVE on this site</b> – adds this website to AIVE’s internal blocklist so it won’t auto-run here.</li>
+      <li><b>Enable AIVE on this site</b> – removes this website from the blocklist.</li>
+    </ul>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
