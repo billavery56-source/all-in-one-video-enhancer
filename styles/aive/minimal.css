@@ -1,37 +1,73 @@
 #aive-root {
   position: fixed;
-  bottom: 20px;
-  left: 20px;
-  width: 240px;
-  background: rgba(15,15,15,0.95);
+  left: 12px;
+  bottom: 12px;
+  width: 260px;
+  background: #111;
   color: #fff;
-  font-family: system-ui;
-  padding: 12px;
-  border-radius: 10px;
-  z-index: 2147483647;
-  box-shadow: 0 10px 30px rgba(0,0,0,.6);
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px #000a;
+  z-index: 999999;
 }
 
 #aive-header {
+  padding: 6px 8px;
+  background: #1a1a1a;
+  display: flex;
+  justify-content: space-between;
+  cursor: default;
   font-weight: bold;
-  margin-bottom: 8px;
 }
 
-#aive-root .row {
-  margin-bottom: 8px;
-}
-
-#aive-root input[type="range"] {
-  width: 100%;
-}
-
-#aive-root button {
-  width: 100%;
-  padding: 8px;
+#aive-header button {
+  background: none;
   border: none;
-  border-radius: 6px;
-  background: #ff5252;
-  color: #fff;
+  color: #4da3ff;
   font-weight: bold;
   cursor: pointer;
+}
+
+#aive-body {
+  padding: 8px;
+}
+
+.aive-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.aive-row label {
+  width: 70px;
+}
+
+.aive-slider {
+  flex: 1;
+}
+
+.aive-value {
+  width: 36px;
+  text-align: right;
+  opacity: 0.7;
+}
+
+.buttons {
+  justify-content: space-between;
+}
+
+button {
+  background: #222;
+  color: #fff;
+  border: none;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+button.toggle.on {
+  background: #4da3ff;
+  color: #000;
 }
