@@ -1,73 +1,91 @@
+/* =====================================================
+   AIVE Panel — Stable Base Styles
+   ===================================================== */
+
 #aive-root {
   position: fixed;
-  left: 12px;
-  bottom: 12px;
-  width: 260px;
-  background: #111;
-  color: #fff;
-  font-family: system-ui, sans-serif;
-  font-size: 12px;
-  border-radius: 8px;
-  box-shadow: 0 10px 30px #000a;
-  z-index: 999999;
+  left: 20px;
+  top: 20px;
+  width: 280px;
+  background: rgba(15, 15, 15, 0.95);
+  color: #eaeaea;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  z-index: 2147483647;
+  user-select: none;
 }
 
-#aive-header {
-  padding: 6px 8px;
-  background: #1a1a1a;
+/* Header */
+#aive-root .aive-header {
   display: flex;
   justify-content: space-between;
-  cursor: default;
-  font-weight: bold;
-}
-
-#aive-header button {
-  background: none;
-  border: none;
-  color: #4da3ff;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-#aive-body {
-  padding: 8px;
-}
-
-.aive-row {
-  display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
+  padding: 10px 12px;
+  font-weight: 700;
+  background: rgba(30, 30, 30, 0.95);
+  border-radius: 12px 12px 0 0;
+  cursor: grab;
 }
 
-.aive-row label {
-  width: 70px;
+#aive-root .aive-header:active {
+  cursor: grabbing;
 }
 
-.aive-slider {
-  flex: 1;
+#aive-root .aive-header .title {
+  color: #f0e890;
 }
 
-.aive-value {
-  width: 36px;
-  text-align: right;
-  opacity: 0.7;
+#aive-root .aive-header .drag {
+  opacity: 0.6;
 }
 
-.buttons {
+/* Body */
+#aive-root .aive-body {
+  padding: 10px 12px;
+}
+
+/* Slider rows */
+#aive-root .row {
+  margin-bottom: 10px;
+}
+
+#aive-root .row label {
+  display: flex;
   justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 4px;
+  color: #e0c870;
 }
 
-button {
-  background: #222;
-  color: #fff;
+#aive-root .row span {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+#aive-root input[type="range"] {
+  width: 100%;
+  accent-color: #ff5252;
+}
+
+/* Buttons */
+#aive-root .buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+#aive-root .buttons button {
+  flex: 1;
+  padding: 6px 0;
   border: none;
-  padding: 5px 8px;
-  border-radius: 5px;
+  border-radius: 6px;
+  background: #00ffd5;
+  color: #002;
+  font-weight: 700;
   cursor: pointer;
 }
 
-button.toggle.on {
-  background: #4da3ff;
-  color: #000;
+#aive-root .buttons button:hover {
+  opacity: 0.9;
 }

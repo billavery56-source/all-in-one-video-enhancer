@@ -1,266 +1,260 @@
 (() => {
-  /**********************************************************
-   * HARD GUARANTEE: PANEL ALWAYS VISIBLE
-   **********************************************************/
+  /************************************************************
+   * AIVE – Stable Panel + Full UI + Per-Domain Position
+   ************************************************************/
 
-  // ----------------------------
-  // INLINE CSS (NO FILE LOAD)
-  // ----------------------------
-  const style = document.createElement("style");
-  style.textContent = `
-    #aive-root {
-      position: fixed;
-      left: 20px;
-      top: 20px;
-      z-index: 2147483647;
-      width: 260px;
-      background: #111;
-      color: #fff;
-      font-family: system-ui, sans-serif;
-      border-radius: 10px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.6);
-      overflow: hidden;
-    }
+  const POSITION_KEY = 'aive-panel-position-v1';
+  const SETTINGS_KEY = 'aive-settings-v1';
 
-    #aive-root.collapsed {
-      height: 36px;
-    }
+  const domainKey = location.hostname.replace(/^www\./, '');
 
-    #aive-root.expanded {
-      height: 360px;
-    }
+  let panel, header, body;
+  let video = null;
 
-    #aive-root {
-      transition: height 400ms ease-in-out;
-    }
-
-    #aive-header {
-      height: 36px;
-      display: flex;
-      align-items: center;
-      padding: 0 10px;
-      cursor: move;
-      background: #1a1a1a;
-      user-select: none;
-    }
-
-    #aive-header .title {
-      font-weight: 700;
-    }
-
-    #aive-header .spacer {
-      flex: 1;
-    }
-
-    #aive-header button {
-      background: none;
-      border: none;
-      color: #0af;
-      font-size: 16px;
-      cursor: pointer;
-    }
-
-    #aive-body {
-      padding: 10px;
-    }
-
-    .row {
-      display: grid;
-      grid-template-columns: 1fr 120px 40px;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 8px;
-      font-size: 12px;
-    }
-
-    .row input[type="range"] {
-      width: 100%;
-    }
-
-    .value {
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .buttons {
-      display: flex;
-      gap: 6px;
-      margin-top: 8px;
-    }
-
-    .buttons button {
-      flex: 1;
-      background: #222;
-      color: #fff;
-      border: 1px solid #333;
-      border-radius: 6px;
-      padding: 6px;
-      cursor: pointer;
-    }
-
-    .buttons button:hover {
-      background: #333;
-    }
-  `;
-  document.documentElement.appendChild(style);
-
-  // ----------------------------
-  // ROOT PANEL
-  // ----------------------------
-  const root = document.createElement("div");
-  root.id = "aive-root";
-  root.className = "collapsed";
-  document.body.appendChild(root);
-
-  // ----------------------------
-  // HEADER
-  // ----------------------------
-  const header = document.createElement("div");
-  header.id = "aive-header";
-  header.innerHTML = `
-    <span class="title">AIVE</span>
-    <span class="spacer"></span>
-    <button title="Help">?</button>
-  `;
-  root.appendChild(header);
-
-  // ----------------------------
-  // BODY
-  // ----------------------------
-  const body = document.createElement("div");
-  body.id = "aive-body";
-  root.appendChild(body);
-
-  // ----------------------------
-  // STATE
-  // ----------------------------
-  const DEFAULTS = {
+  let settings = {
     brightness: 1,
     contrast: 1,
     saturate: 1,
     sepia: 0,
     hue: 0,
-    zoom: 1
+    zoom: 1,
+    mirrorH: false,
+    mirrorV: false
   };
-  const state = { ...DEFAULTS };
-  let video = null;
 
-  // ----------------------------
-  // SLIDERS
-  // ----------------------------
-  function addSlider(key, label, min, max, step) {
-    const row = document.createElement("div");
-    row.className = "row";
-
-    const lbl = document.createElement("span");
-    lbl.textContent = label;
-
-    const input = document.createElement("input");
-    input.type = "range";
-    input.min = min;
-    input.max = max;
-    input.step = step;
-    input.value = state[key];
-
-    const val = document.createElement("span");
-    val.className = "value";
-    val.textContent = state[key];
-
-    input.oninput = () => {
-      state[key] = parseFloat(input.value);
-      val.textContent = input.value;
-      applyFilters();
-    };
-
-    row.append(lbl, input, val);
-    body.appendChild(row);
+  /* ----------------------------------------------------------
+     UTIL
+  ---------------------------------------------------------- */
+  function clamp(panel) {
+    const r = panel.getBoundingClientRect();
+    panel.style.left =
+      Math.max(0, Math.min(window.innerWidth - r.width, r.left)) + 'px';
+    panel.style.top =
+      Math.max(0, Math.min(window.innerHeight - r.height, r.top)) + 'px';
   }
 
-  addSlider("brightness", "Brightness", 0, 2, 0.01);
-  addSlider("contrast", "Contrast", 0, 2, 0.01);
-  addSlider("saturate", "Saturation", 0, 3, 0.01);
-  addSlider("sepia", "Sepia", 0, 1, 0.01);
-  addSlider("hue", "Hue", -180, 180, 1);
-  addSlider("zoom", "Zoom", 0.5, 3, 0.01);
-
-  // ----------------------------
-  // BUTTONS
-  // ----------------------------
-  const buttons = document.createElement("div");
-  buttons.className = "buttons";
-
-  const autoBtn = document.createElement("button");
-  autoBtn.textContent = "Auto";
-  autoBtn.onclick = () => {
-    Object.assign(state, {
-      brightness: 1.05,
-      contrast: 1.05,
-      saturate: 1.1,
-      sepia: 0,
-      hue: 0,
-      zoom: 1
+  function savePosition() {
+    chrome.storage.local.get(POSITION_KEY, res => {
+      const map = res[POSITION_KEY] || {};
+      const r = panel.getBoundingClientRect();
+      map[domainKey] = { x: r.left, y: r.top };
+      chrome.storage.local.set({ [POSITION_KEY]: map });
     });
-    sync();
-    applyFilters();
-  };
-
-  const resetBtn = document.createElement("button");
-  resetBtn.textContent = "Reset";
-  resetBtn.onclick = () => {
-    Object.assign(state, DEFAULTS);
-    sync();
-    applyFilters();
-  };
-
-  buttons.append(autoBtn, resetBtn);
-  body.appendChild(buttons);
-
-  // ----------------------------
-  // VIDEO HANDLING (NON-BLOCKING)
-  // ----------------------------
-  function findVideo() {
-    const v = document.querySelector("video");
-    if (v && v !== video) {
-      video = v;
-      applyFilters();
-    }
   }
 
-  const mo = new MutationObserver(findVideo);
-  mo.observe(document.body, { childList: true, subtree: true });
-  findVideo();
+  function loadPosition() {
+    chrome.storage.local.get(POSITION_KEY, res => {
+      const map = res[POSITION_KEY] || {};
+      const pos = map[domainKey];
+      if (!pos) return;
+      panel.style.left = pos.x + 'px';
+      panel.style.top = pos.y + 'px';
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+    });
+  }
+
+  function findVideo() {
+    return [...document.querySelectorAll('video')]
+      .find(v => v.offsetWidth && v.offsetHeight) || null;
+  }
 
   function applyFilters() {
     if (!video) return;
+
     video.style.filter = `
-      brightness(${state.brightness})
-      contrast(${state.contrast})
-      saturate(${state.saturate})
-      sepia(${state.sepia})
-      hue-rotate(${state.hue}deg)
+      brightness(${settings.brightness})
+      contrast(${settings.contrast})
+      saturate(${settings.saturate})
+      sepia(${settings.sepia})
+      hue-rotate(${settings.hue}deg)
     `;
-    video.style.transform = `scale(${state.zoom})`;
+
+    const sx = (settings.mirrorH ? -1 : 1) * settings.zoom;
+    const sy = (settings.mirrorV ? -1 : 1) * settings.zoom;
+    video.style.transform = `scale(${sx}, ${sy})`;
   }
 
-  function sync() {
-    body.querySelectorAll(".row").forEach(row => {
-      const input = row.querySelector("input");
-      const key = Object.keys(state).find(k => input.value == state[k]);
-      row.querySelector(".value").textContent = input.value;
+  function saveSettings() {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) Object.assign(settings, JSON.parse(raw));
+    } catch {}
+  }
+
+  /* ----------------------------------------------------------
+     UI
+  ---------------------------------------------------------- */
+  function createPanel() {
+    if (document.getElementById('aive-root')) return;
+
+    panel = document.createElement('div');
+    panel.id = 'aive-root';
+    panel.style.position = 'fixed';
+    panel.style.left = '20px';
+    panel.style.top = '20px';
+    panel.style.zIndex = '2147483647';
+
+    panel.innerHTML = `
+      <div class="aive-header">
+        <span class="title">AIVE</span>
+        <span class="drag">⇕</span>
+      </div>
+      <div class="aive-body">
+        ${slider('Brightness', 'brightness', 0, 2, 0.1)}
+        ${slider('Contrast', 'contrast', 0, 2, 0.1)}
+        ${slider('Saturation', 'saturate', 0, 2, 0.1)}
+        ${slider('Sepia', 'sepia', 0, 1, 0.1)}
+        ${slider('Hue', 'hue', -180, 180, 1)}
+        ${slider('Zoom', 'zoom', 0.5, 3, 0.1)}
+
+        <div class="buttons">
+          <button id="auto">Auto</button>
+          <button id="reset">Reset</button>
+          <button id="mh">H</button>
+          <button id="mv">V</button>
+        </div>
+
+        <div class="buttons">
+          <button id="disable">Disable site</button>
+          <button id="help">?</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    header = panel.querySelector('.aive-header');
+    body = panel.querySelector('.aive-body');
+
+    enableDrag();
+    loadPosition();
+    bindUI();
+  }
+
+  function slider(label, key, min, max, step) {
+    return `
+      <div class="row">
+        <label>${label}<span data-val="${key}"></span></label>
+        <input type="range"
+          min="${min}" max="${max}" step="${step}"
+          value="${settings[key]}"
+          data-key="${key}">
+      </div>
+    `;
+  }
+
+  function bindUI() {
+    panel.querySelectorAll('input[type=range]').forEach(sl => {
+      const key = sl.dataset.key;
+      updateValue(key, sl.value);
+
+      sl.addEventListener('input', () => {
+        settings[key] = Number(sl.value);
+        updateValue(key, sl.value);
+        saveSettings();
+        applyFilters();
+      });
     });
+
+    panel.querySelector('#auto').onclick = autoAdjust;
+    panel.querySelector('#reset').onclick = resetAll;
+    panel.querySelector('#mh').onclick = () => toggleMirror('mirrorH');
+    panel.querySelector('#mv').onclick = () => toggleMirror('mirrorV');
   }
 
-  // ----------------------------
-  // COLLAPSE / EXPAND (CSS ONLY)
-  // ----------------------------
-  root.addEventListener("mouseenter", () => {
-    root.classList.remove("collapsed");
-    root.classList.add("expanded");
-  });
+  function updateValue(key, val) {
+    const span = panel.querySelector(`[data-val="${key}"]`);
+    if (span) span.textContent = Number(val).toFixed(2);
+  }
 
-  root.addEventListener("mouseleave", () => {
-    root.classList.remove("expanded");
-    root.classList.add("collapsed");
-  });
+  function resetAll() {
+    settings = {
+      brightness: 1,
+      contrast: 1,
+      saturate: 1,
+      sepia: 0,
+      hue: 0,
+      zoom: 1,
+      mirrorH: false,
+      mirrorV: false
+    };
+    saveSettings();
+    panel.querySelectorAll('input[type=range]').forEach(sl => {
+      sl.value = settings[sl.dataset.key];
+      updateValue(sl.dataset.key, sl.value);
+    });
+    applyFilters();
+  }
 
+  function toggleMirror(k) {
+    settings[k] = !settings[k];
+    saveSettings();
+    applyFilters();
+  }
+
+  function autoAdjust() {
+    settings.brightness = 1.1;
+    settings.contrast = 1.1;
+    settings.saturate = 1.05;
+    saveSettings();
+    panel.querySelectorAll('input[type=range]').forEach(sl => {
+      sl.value = settings[sl.dataset.key];
+      updateValue(sl.dataset.key, sl.value);
+    });
+    applyFilters();
+  }
+
+  /* ----------------------------------------------------------
+     DRAG
+  ---------------------------------------------------------- */
+  function enableDrag() {
+    let dragging = false, sx = 0, sy = 0, sl = 0, st = 0;
+
+    header.onmousedown = e => {
+      dragging = true;
+      sx = e.clientX;
+      sy = e.clientY;
+      const r = panel.getBoundingClientRect();
+      sl = r.left;
+      st = r.top;
+      document.body.style.userSelect = 'none';
+    };
+
+    document.onmousemove = e => {
+      if (!dragging) return;
+      panel.style.left = sl + (e.clientX - sx) + 'px';
+      panel.style.top = st + (e.clientY - sy) + 'px';
+    };
+
+    document.onmouseup = () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.userSelect = '';
+      clamp(panel);
+      savePosition();
+    };
+  }
+
+  /* ----------------------------------------------------------
+     INIT
+  ---------------------------------------------------------- */
+  function init() {
+    loadSettings();
+    createPanel();
+
+    video = findVideo();
+    if (video) applyFilters();
+
+    new MutationObserver(() => {
+      video = findVideo();
+      applyFilters();
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  init();
 })();

@@ -35,13 +35,14 @@
 },
 
   "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["scripts/content-minimal.js"],
-      "run_at": "document_idle",
-      "all_frames": true
-    }
-  ],
+  {
+    "matches": ["<all_urls>"],
+    "js": ["scripts/content-minimal.js"],
+    "css": ["styles/aive/panel.css"],
+    "run_at": "document_idle",
+    "all_frames": true
+  }
+],
 
  "web_accessible_resources": [
   {
