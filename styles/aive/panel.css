@@ -1,95 +1,180 @@
-/* =====================================================
-   AIVE Panel — Stable Base Styles
-   ===================================================== */
-
+/* =========================================================
+   ROOT
+========================================================= */
 #aive-root {
   position: fixed;
+  top: 120px;
   left: 20px;
-  top: 20px;
-  width: 280px;
-  background: rgba(15, 15, 15, 0.95);
-  color: #eaeaea;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont;
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
   z-index: 2147483647;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: #f0a060;
   user-select: none;
 }
 
-/* Header */
-#aive-root .aive-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  font-weight: 700;
-  background: rgba(30, 30, 30, 0.95);
-  border-radius: 12px 12px 0 0;
-  cursor: grab;
+/* =========================================================
+   SHELL
+========================================================= */
+.aive-shell {
+  width: 300px;
+  background: linear-gradient(180deg, #111, #0b0b0b);
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.7);
+  overflow: hidden;
 }
 
-#aive-root .aive-header:active {
+/* =========================================================
+   HEADER (DRAG HANDLE)
+========================================================= */
+.aive-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: grab;
+  background: linear-gradient(180deg, #1a1a1a, #0f0f0f);
+}
+
+.aive-header:active {
   cursor: grabbing;
 }
 
-#aive-root .aive-header .title {
+.aive-header .title {
+  font-weight: 700;
   color: #f0e890;
 }
 
-#aive-root .aive-header .drag {
-  opacity: 0.6;
-}
-
-/* Body */
-#aive-root .aive-body {
-  padding: 10px 12px;
-}
-
-/* Slider rows */
-#aive-root .row {
-  margin-bottom: 10px;
-}
-
-#aive-root .row label {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 4px;
-  color: #e0c870;
-}
-
-#aive-root .row span {
-  color: #ffffff;
-  font-weight: 600;
-}
-
-#aive-root input[type="range"] {
-  width: 100%;
-  accent-color: #ff5252;
-}
-
-/* Buttons */
-#aive-root .buttons {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-#aive-root .buttons button {
+.aive-header .spacer {
   flex: 1;
-  padding: 6px 0;
-  border: none;
+}
+
+.aive-header .help {
+  color: #4aa3ff;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+/* =========================================================
+   BODY (SHADE EFFECT)
+========================================================= */
+.aive-body {
+  overflow: hidden;
+  max-height: 0;
+  padding: 0 12px;
+  transition: max-height 0.6s ease-in-out;
+}
+
+#aive-root.expanded .aive-body {
+  max-height: 800px;
+  padding-bottom: 12px;
+}
+
+/* =========================================================
+   SLIDERS
+========================================================= */
+.row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.row label {
+  font-size: 13px;
+  color: #f0a060;
+}
+
+.row input[type="range"] {
+  appearance: none;
+  height: 6px;
   border-radius: 6px;
-  background: #00ffd5;
-  color: #002;
-  font-weight: 700;
+  background: #eee;
+  outline: none;
+}
+
+.row input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #d06050;
+  border-radius: 50%;
   cursor: pointer;
 }
 
-#aive-root .buttons button:hover {
-  opacity: 0.9;
+.row .val {
+  font-size: 12px;
+  min-width: 36px;
+  text-align: right;
+  color: #ddd;
 }
 
-#aive-root .buttons {
-    background: #0000;
+/* =========================================================
+   BUTTON CONTAINER — FORCE TRANSPARENT
+========================================================= */
+.buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+
+  /* KILL ALL BACKGROUNDS */
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+/* =========================================================
+   BUTTON RESET (NUKE SITE STYLES)
+========================================================= */
+.buttons button {
+  all: unset;                     /* ← THIS is the fix */
+  display: block;
+  text-align: center;
+  border-radius: 8px;
+  padding: 10px 0;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+
+  /* DARK GRADIENT */
+  background: linear-gradient(145deg, #1b1b1b, #0d0d0d);
+  color: #cfcfcf;
+
+  transition: color .25s ease;
+}
+
+/* =========================================================
+   SHIMMER EFFECT
+========================================================= */
+.buttons button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  left: -150%;
+  background: linear-gradient(
+    120deg,
+    transparent,
+    rgba(255,255,255,.18),
+    transparent
+  );
+}
+
+/* hover */
+.buttons button:hover {
+  color: #f0e890;
+}
+
+.buttons button:hover::after {
+  animation: shimmer .9s linear;
+}
+
+/* active */
+.buttons button:active {
+  color: #f0e890;
+}
+
+@keyframes shimmer {
+  from { left: -150%; }
+  to   { left: 150%; }
 }
