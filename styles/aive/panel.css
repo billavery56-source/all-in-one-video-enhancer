@@ -1,180 +1,213 @@
-/* =========================================================
-   ROOT
-========================================================= */
+/* =========================
+   ROOT PANEL
+   ========================= */
+
+@keyframes aive-glow {
+  0%   { box-shadow: 0 0 18px rgba(240,160,96,.18); }
+  50%  { box-shadow: 0 0 26px rgba(240,160,96,.32); }
+  100% { box-shadow: 0 0 18px rgba(240,160,96,.18); }
+}
+
 #aive-root {
   position: fixed;
   top: 120px;
-  left: 20px;
-  z-index: 2147483647;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  color: #f0a060;
-  user-select: none;
+  left: 40px;
+  width: 320px;
+
+  background: rgba(18,18,18,.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  color: #eee;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
+  border-radius: 14px;
+  z-index: 999999;
+
+  animation: aive-glow 6s ease-in-out infinite;
+  transition:
+    box-shadow .35s ease,
+    transform .2s ease;
 }
 
-/* =========================================================
-   SHELL
-========================================================= */
-.aive-shell {
-  width: 300px;
-  background: linear-gradient(180deg, #111, #0b0b0b);
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0,0,0,.7);
-  overflow: hidden;
+/* Stronger glow on hover / interaction */
+#aive-root:hover {
+  box-shadow:
+    0 0 38px rgba(240,160,96,.55),
+    0 12px 34px rgba(0,0,0,.7);
 }
 
-/* =========================================================
-   HEADER (DRAG HANDLE)
-========================================================= */
-.aive-header {
+/* =========================
+   HEADER
+   ========================= */
+
+#aive-header {
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: move;
+
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  cursor: grab;
-  background: linear-gradient(180deg, #1a1a1a, #0f0f0f);
+
+  border-bottom: 1px solid rgba(255,255,255,.06);
 }
 
-.aive-header:active {
-  cursor: grabbing;
-}
-
-.aive-header .title {
-  font-weight: 700;
-  color: #f0e890;
-}
-
-.aive-header .spacer {
-  flex: 1;
-}
-
-.aive-header .help {
-  color: #4aa3ff;
+#aive-help {
   cursor: pointer;
-  font-weight: bold;
+  color: #6fc7ff;
+  font-weight: 700;
 }
 
-/* =========================================================
-   BODY (SHADE EFFECT)
-========================================================= */
+/* =========================
+   BODY COLLAPSE
+   ========================= */
+
 .aive-body {
   overflow: hidden;
   max-height: 0;
-  padding: 0 12px;
-  transition: max-height 0.6s ease-in-out;
+  transition: max-height .5s cubic-bezier(.4,0,.2,1);
 }
 
-#aive-root.expanded .aive-body {
+#aive-root:hover .aive-body {
   max-height: 800px;
-  padding-bottom: 12px;
 }
 
-/* =========================================================
+/* =========================
    SLIDERS
-========================================================= */
+   ========================= */
+
 .row {
+  padding: 8px 14px;
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 10px;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
   align-items: center;
-  margin-top: 10px;
 }
 
 .row label {
-  font-size: 13px;
+  grid-column: span 3;
   color: #f0a060;
+  font-size: 13px;
 }
 
 .row input[type="range"] {
-  appearance: none;
-  height: 6px;
-  border-radius: 6px;
-  background: #eee;
-  outline: none;
+  grid-column: span 2;
 }
 
-.row input[type="range"]::-webkit-slider-thumb {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  background: #d06050;
-  border-radius: 50%;
-  cursor: pointer;
-}
-
-.row .val {
+.val {
   font-size: 12px;
-  min-width: 36px;
+  opacity: .85;
   text-align: right;
-  color: #ddd;
 }
 
-/* =========================================================
-   BUTTON CONTAINER — FORCE TRANSPARENT
-========================================================= */
-.buttons {
+/* =========================
+   GLASSY BUTTONS
+   ========================= */
+
+.aive-buttons {
+  padding: 14px;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-top: 14px;
-
-  /* KILL ALL BACKGROUNDS */
-  background: transparent !important;
-  box-shadow: none !important;
-  border: none !important;
 }
 
-/* =========================================================
-   BUTTON RESET (NUKE SITE STYLES)
-========================================================= */
-.buttons button {
-  all: unset;                     /* ← THIS is the fix */
-  display: block;
-  text-align: center;
-  border-radius: 8px;
+.aive-buttons button {
+  position: relative;
   padding: 10px 0;
+
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.15);
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255,255,255,.08),
+      rgba(255,255,255,.02)
+    );
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+
+  color: #cfcfcf;
   font-weight: 600;
   cursor: pointer;
-  position: relative;
   overflow: hidden;
 
-  /* DARK GRADIENT */
-  background: linear-gradient(145deg, #1b1b1b, #0d0d0d);
-  color: #cfcfcf;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.25),
+    0 6px 14px rgba(0,0,0,.45);
 
-  transition: color .25s ease;
+  transition:
+    color .25s ease,
+    transform .2s ease,
+    box-shadow .25s ease;
 }
 
-/* =========================================================
-   SHIMMER EFFECT
-========================================================= */
-.buttons button::after {
-  content: '';
+/* Shimmer */
+.aive-buttons button::before {
+  content: "";
   position: absolute;
   inset: 0;
-  left: -150%;
-  background: linear-gradient(
-    120deg,
-    transparent,
-    rgba(255,255,255,.18),
-    transparent
-  );
+  background:
+    linear-gradient(
+      120deg,
+      transparent 30%,
+      rgba(255,255,255,.28),
+      transparent 70%
+    );
+  transform: translateX(-120%);
+  transition: transform .6s ease;
 }
 
-/* hover */
-.buttons button:hover {
-  color: #f0e890;
+.aive-buttons button:hover {
+  color: #ffe066;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.35),
+    0 12px 28px rgba(0,0,0,.65);
 }
 
-.buttons button:hover::after {
-  animation: shimmer .9s linear;
+.aive-buttons button:hover::before {
+  transform: translateX(120%);
 }
 
-/* active */
-.buttons button:active {
-  color: #f0e890;
+.aive-buttons button:active {
+  transform: translateY(0);
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.6);
 }
 
-@keyframes shimmer {
-  from { left: -150%; }
-  to   { left: 150%; }
+/* =========================
+   HELP MODAL
+   ========================= */
+
+#aive-help-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  z-index: 1000000;
+}
+
+#aive-help-modal.show {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#aive-help-modal > * {
+  background: rgba(20,20,20,.95);
+  backdrop-filter: blur(16px);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 20px 40px rgba(0,0,0,.7);
+}
+
+#aive-help-modal h3 {
+  margin-top: 0;
+}
+
+#aive-help-modal ul {
+  margin: 10px 0;
+  padding-left: 18px;
 }
