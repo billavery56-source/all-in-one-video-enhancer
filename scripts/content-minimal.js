@@ -1,34 +1,65 @@
 // ======================================================
-// AIVE – CONTENT SCRIPT (BLIND + SPEED + INERTIA + DELAY)
+// AIVE – CONTENT SCRIPT (FULL WORKING BUILD)
 // ======================================================
 
 (() => {
   "use strict";
 
-  // --------------------------------------------------
-  // CONTEXT
-  // --------------------------------------------------
+  if (window.__AIVE_LOADED__) return;
+  window.__AIVE_LOADED__ = true;
 
   let ALIVE = true;
   window.addEventListener("pagehide", () => ALIVE = false);
   window.addEventListener("beforeunload", () => ALIVE = false);
 
-  if (window.__AIVE_LOADED__) return;
-  window.__AIVE_LOADED__ = true;
-
   // --------------------------------------------------
-  // CONFIG (LIVE)
-// --------------------------------------------------
-
-  let animDuration = 1200;     // ms
-  let inertia = 2.4;          // easing weight
-  let collapseDelay = 600;    // ms before closing
-
-  // --------------------------------------------------
-  // EASING (REAL BLIND FEEL)
+  // VIDEO TARGET
   // --------------------------------------------------
 
-  function easeOutWeighted(t) {
+  function getVideo() {
+    return document.querySelector("video");
+  }
+
+  // --------------------------------------------------
+  // EFFECT STATE
+  // --------------------------------------------------
+
+  const state = {
+    brightness: 1,
+    contrast: 1,
+    saturation: 1,
+    sepia: 0,
+    zoom: 1,
+    flip: false
+  };
+
+  function applyEffects() {
+    const v = getVideo();
+    if (!v) return;
+
+    v.style.filter = `
+      brightness(${state.brightness})
+      contrast(${state.contrast})
+      saturate(${state.saturation})
+      sepia(${state.sepia})
+    `;
+
+    v.style.transform = `
+      scale(${state.zoom})
+      scaleX(${state.flip ? -1 : 1})
+    `;
+    v.style.transformOrigin = "center center";
+  }
+
+  // --------------------------------------------------
+  // ANIMATION CONFIG
+  // --------------------------------------------------
+
+  let animDuration = 1200;
+  let inertia = 2.4;
+  let collapseDelay = 600;
+
+  function easeOut(t) {
     return 1 - Math.pow(1 - t, inertia);
   }
 
@@ -42,78 +73,31 @@
 
     root.innerHTML = `
       <div class="aive-panel">
-        <div class="aive-header">
-          <div class="aive-title">AIVE ?</div>
-        </div>
+        <div class="aive-header">AIVE ?</div>
 
         <div class="aive-clip">
           <div class="aive-body">
 
-            <div class="aive-row">
-              <label>Brightness</label>
-              <input type="range">
-            </div>
+            ${slider("Brightness", "brightness", 0, 2, 0.01, 1)}
+            ${slider("Contrast", "contrast", 0, 2, 0.01, 1)}
+            ${slider("Saturation", "saturation", 0, 2, 0.01, 1)}
+            ${slider("Sepia", "sepia", 0, 1, 0.01, 0)}
+            ${slider("Zoom", "zoom", 1, 2, 0.01, 1)}
 
             <div class="aive-row">
-              <label>Contrast</label>
-              <input type="range">
+              <label>Flip Horizontal</label>
+              <button class="aive-flip">Flip</button>
             </div>
 
-            <div class="aive-row">
-              <label>Saturation</label>
-              <input type="range">
-            </div>
-
-            <div class="aive-row">
-              <label>
-                Animation Speed
-                <span class="aive-val">${animDuration}ms</span>
-              </label>
-              <input
-                type="range"
-                min="100"
-                max="3000"
-                step="50"
-                value="${animDuration}"
-                class="aive-speed"
-              >
-            </div>
-
-            <div class="aive-row">
-              <label>
-                Blind Weight
-                <span class="aive-val">${inertia.toFixed(1)}</span>
-              </label>
-              <input
-                type="range"
-                min="1"
-                max="4"
-                step="0.1"
-                value="${inertia}"
-                class="aive-inertia"
-              >
-            </div>
-
-            <div class="aive-row">
-              <label>
-                Collapse Delay
-                <span class="aive-val">${collapseDelay}ms</span>
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="2000"
-                step="50"
-                value="${collapseDelay}"
-                class="aive-delay"
-              >
-            </div>
+            ${slider("Animation Speed", "speed", 100, 3000, 50, animDuration)}
+            ${slider("Blind Weight", "inertia", 1, 4, 0.1, inertia)}
+            ${slider("Collapse Delay", "delay", 0, 2000, 50, collapseDelay)}
 
             <div class="aive-buttons">
-              <button>Auto</button>
-              <button>Reset</button>
-              <button>Disable Tab</button>
-              <button>Blacklist Domain</button>
+              <button class="aive-auto">Auto</button>
+              <button class="aive-reset">Reset</button>
+              <button class="aive-disable">Disable Tab</button>
+              <button class="aive-blacklist">Blacklist Domain</button>
             </div>
 
           </div>
@@ -123,13 +107,82 @@
 
     document.body.appendChild(root);
 
+    wireControls(root);
     enableBlind(root);
-    enableControls(root);
     makeDraggable(root);
   }
 
+  function slider(label, key, min, max, step, value) {
+    return `
+      <div class="aive-row">
+        <label>${label} <span class="aive-val">${value}</span></label>
+        <input type="range"
+          data-key="${key}"
+          min="${min}" max="${max}" step="${step}" value="${value}">
+      </div>
+    `;
+  }
+
   // --------------------------------------------------
-  // BLIND ANIMATION (WITH DELAY)
+  // CONTROLS
+  // --------------------------------------------------
+
+  function wireControls(root) {
+    root.querySelectorAll("input[type=range]").forEach(sl => {
+      sl.addEventListener("input", () => {
+        const key = sl.dataset.key;
+        const val = Number(sl.value);
+        sl.previousElementSibling.querySelector(".aive-val").textContent = val;
+
+        if (key in state) {
+          state[key] = val;
+          applyEffects();
+        }
+
+        if (key === "speed") animDuration = val;
+        if (key === "inertia") inertia = val;
+        if (key === "delay") collapseDelay = val;
+      });
+    });
+
+    root.querySelector(".aive-flip").onclick = () => {
+      state.flip = !state.flip;
+      applyEffects();
+    };
+
+    root.querySelector(".aive-reset").onclick = () => {
+      Object.assign(state, {
+        brightness: 1,
+        contrast: 1,
+        saturation: 1,
+        sepia: 0,
+        zoom: 1,
+        flip: false
+      });
+      root.querySelectorAll("input[type=range]").forEach(sl => {
+        sl.value = sl.getAttribute("value");
+        sl.dispatchEvent(new Event("input"));
+      });
+    };
+
+    root.querySelector(".aive-auto").onclick = () => {
+      state.brightness = 1.1;
+      state.contrast = 1.1;
+      state.saturation = 1.15;
+      applyEffects();
+    };
+
+    root.querySelector(".aive-disable").onclick = () => {
+      root.remove();
+    };
+
+    root.querySelector(".aive-blacklist").onclick = () => {
+      alert("Blacklist UI coming next step.");
+    };
+  }
+
+  // --------------------------------------------------
+  // BLIND ANIMATION
   // --------------------------------------------------
 
   function enableBlind(root) {
@@ -139,79 +192,40 @@
 
     let expanded = false;
     let animating = false;
-    let collapseTimer = null;
+    let timer = null;
 
-    function animate(toHeight) {
+    function animate(to) {
       if (animating) return;
       animating = true;
 
-      const startHeight = clip.offsetHeight;
-      const delta = toHeight - startHeight;
-      const startTime = performance.now();
+      const from = clip.offsetHeight;
+      const delta = to - from;
+      const start = performance.now();
 
       function frame(now) {
-        if (!ALIVE) return;
-
-        const rawT = Math.min((now - startTime) / animDuration, 1);
-        const t = easeOutWeighted(rawT);
-
-        clip.style.height = startHeight + delta * t + "px";
-
-        if (rawT < 1) {
-          requestAnimationFrame(frame);
-        } else {
-          animating = false;
-        }
+        const t = Math.min((now - start) / animDuration, 1);
+        clip.style.height = from + delta * easeOut(t) + "px";
+        if (t < 1) requestAnimationFrame(frame);
+        else animating = false;
       }
-
       requestAnimationFrame(frame);
     }
 
-    header.addEventListener("mouseenter", () => {
-      if (collapseTimer) {
-        clearTimeout(collapseTimer);
-        collapseTimer = null;
+    header.onmouseenter = () => {
+      clearTimeout(timer);
+      if (!expanded) {
+        expanded = true;
+        animate(body.scrollHeight);
       }
+    };
 
-      if (expanded) return;
-      expanded = true;
-      animate(body.scrollHeight);
-    });
-
-    root.addEventListener("mouseleave", () => {
+    root.onmouseleave = () => {
       if (!expanded) return;
-
-      collapseTimer = setTimeout(() => {
+      timer = setTimeout(() => {
         expanded = false;
         animate(0);
       }, collapseDelay);
-    });
-  }
-
-  // --------------------------------------------------
-  // CONTROLS
-  // --------------------------------------------------
-
-  function enableControls(root) {
-    const speed = root.querySelector(".aive-speed");
-    const inertiaSlider = root.querySelector(".aive-inertia");
-    const delaySlider = root.querySelector(".aive-delay");
-    const values = root.querySelectorAll(".aive-val");
-
-    speed.addEventListener("input", () => {
-      animDuration = Number(speed.value);
-      values[0].textContent = `${animDuration}ms`;
-    });
-
-    inertiaSlider.addEventListener("input", () => {
-      inertia = Number(inertiaSlider.value);
-      values[1].textContent = inertia.toFixed(1);
-    });
-
-    delaySlider.addEventListener("input", () => {
-      collapseDelay = Number(delaySlider.value);
-      values[2].textContent = `${collapseDelay}ms`;
-    });
+    };
   }
 
   // --------------------------------------------------
@@ -219,38 +233,30 @@
   // --------------------------------------------------
 
   function makeDraggable(root) {
-    const header = root.querySelector(".aive-header");
-    let ox = 0, oy = 0;
+    const h = root.querySelector(".aive-header");
+    let ox, oy;
 
-    header.addEventListener("mousedown", e => {
+    h.onmousedown = e => {
       ox = e.clientX - root.offsetLeft;
       oy = e.clientY - root.offsetTop;
 
-      const move = e => {
-        root.style.left = e.clientX - ox + "px";
-        root.style.top = e.clientY - oy + "px";
-      };
+      document.onmousemove = e =>
+        root.style.cssText += `left:${e.clientX - ox}px;top:${e.clientY - oy}px;`;
 
-      const up = () => {
-        document.removeEventListener("mousemove", move);
-        document.removeEventListener("mouseup", up);
-      };
-
-      document.addEventListener("mousemove", move);
-      document.addEventListener("mouseup", up);
-    });
+      document.onmouseup = () => document.onmousemove = null;
+    };
   }
 
   // --------------------------------------------------
   // INIT
   // --------------------------------------------------
 
-  function waitForBody(cb) {
+  function waitForBody() {
     if (!ALIVE) return;
-    if (document.body) return cb();
-    requestAnimationFrame(() => waitForBody(cb));
+    if (document.body) createPanel();
+    else requestAnimationFrame(waitForBody);
   }
 
-  waitForBody(createPanel);
+  waitForBody();
 
 })();
