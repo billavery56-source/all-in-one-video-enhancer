@@ -1,5 +1,5 @@
 // ======================================================
-// AIVE – CONTENT SCRIPT (BLIND + SPEED + INERTIA)
+// AIVE – CONTENT SCRIPT (BLIND + SPEED + INERTIA + DELAY)
 // ======================================================
 
 (() => {
@@ -17,11 +17,12 @@
   window.__AIVE_LOADED__ = true;
 
   // --------------------------------------------------
-  // CONFIG
-  // --------------------------------------------------
+  // CONFIG (LIVE)
+// --------------------------------------------------
 
   let animDuration = 1200;     // ms
-  let inertia = 2.2;          // easing strength (1–4)
+  let inertia = 2.4;          // easing weight
+  let collapseDelay = 600;    // ms before closing
 
   // --------------------------------------------------
   // EASING (REAL BLIND FEEL)
@@ -66,7 +67,7 @@
             <div class="aive-row">
               <label>
                 Animation Speed
-                <span class="aive-ms">${animDuration}ms</span>
+                <span class="aive-val">${animDuration}ms</span>
               </label>
               <input
                 type="range"
@@ -81,7 +82,7 @@
             <div class="aive-row">
               <label>
                 Blind Weight
-                <span class="aive-ms">${inertia.toFixed(1)}</span>
+                <span class="aive-val">${inertia.toFixed(1)}</span>
               </label>
               <input
                 type="range"
@@ -90,6 +91,21 @@
                 step="0.1"
                 value="${inertia}"
                 class="aive-inertia"
+              >
+            </div>
+
+            <div class="aive-row">
+              <label>
+                Collapse Delay
+                <span class="aive-val">${collapseDelay}ms</span>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="2000"
+                step="50"
+                value="${collapseDelay}"
+                class="aive-delay"
               >
             </div>
 
@@ -113,7 +129,7 @@
   }
 
   // --------------------------------------------------
-  // BLIND ANIMATION (FINAL FORM)
+  // BLIND ANIMATION (WITH DELAY)
   // --------------------------------------------------
 
   function enableBlind(root) {
@@ -123,6 +139,7 @@
 
     let expanded = false;
     let animating = false;
+    let collapseTimer = null;
 
     function animate(toHeight) {
       if (animating) return;
@@ -151,6 +168,11 @@
     }
 
     header.addEventListener("mouseenter", () => {
+      if (collapseTimer) {
+        clearTimeout(collapseTimer);
+        collapseTimer = null;
+      }
+
       if (expanded) return;
       expanded = true;
       animate(body.scrollHeight);
@@ -158,8 +180,11 @@
 
     root.addEventListener("mouseleave", () => {
       if (!expanded) return;
-      expanded = false;
-      animate(0);
+
+      collapseTimer = setTimeout(() => {
+        expanded = false;
+        animate(0);
+      }, collapseDelay);
     });
   }
 
@@ -170,16 +195,22 @@
   function enableControls(root) {
     const speed = root.querySelector(".aive-speed");
     const inertiaSlider = root.querySelector(".aive-inertia");
-    const labels = root.querySelectorAll(".aive-ms");
+    const delaySlider = root.querySelector(".aive-delay");
+    const values = root.querySelectorAll(".aive-val");
 
     speed.addEventListener("input", () => {
       animDuration = Number(speed.value);
-      labels[0].textContent = `${animDuration}ms`;
+      values[0].textContent = `${animDuration}ms`;
     });
 
     inertiaSlider.addEventListener("input", () => {
       inertia = Number(inertiaSlider.value);
-      labels[1].textContent = inertia.toFixed(1);
+      values[1].textContent = inertia.toFixed(1);
+    });
+
+    delaySlider.addEventListener("input", () => {
+      collapseDelay = Number(delaySlider.value);
+      values[2].textContent = `${collapseDelay}ms`;
     });
   }
 
