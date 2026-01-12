@@ -1,272 +1,225 @@
+// ======================================================
+// AIVE – CONTENT SCRIPT (BLIND + SPEED + INERTIA)
+// ======================================================
+
 (() => {
-  'use strict';
+  "use strict";
 
-  /**********************************************************
-   * HARD GUARDS
-   **********************************************************/
-  if (window.top !== window) return;
-  if (!window.chrome || !chrome.runtime?.id) return;
-  if (window.__AIVE_ACTIVE__) return;
-  window.__AIVE_ACTIVE__ = true;
+  // --------------------------------------------------
+  // CONTEXT
+  // --------------------------------------------------
 
-  /**********************************************************
-   * CONSTANTS & STORAGE
-   **********************************************************/
-  const DOMAIN = location.hostname;
-  const STORAGE = chrome.storage.local;
+  let ALIVE = true;
+  window.addEventListener("pagehide", () => ALIVE = false);
+  window.addEventListener("beforeunload", () => ALIVE = false);
 
-  const KEYS = {
-    BLACKLIST: 'aive_blacklist_domains',
-    POSITIONS: 'aive_panel_positions'
-  };
+  if (window.__AIVE_LOADED__) return;
+  window.__AIVE_LOADED__ = true;
 
-  const get = key => new Promise(r => STORAGE.get(key, v => r(v[key])));
-  const set = obj => new Promise(r => STORAGE.set(obj, r));
+  // --------------------------------------------------
+  // CONFIG
+  // --------------------------------------------------
 
-  /**********************************************************
-   * CSS (ASSUMES panel.css via manifest)
-   **********************************************************/
-  // Do NOT inject CSS dynamically. Manifest handles it.
+  let animDuration = 1200;     // ms
+  let inertia = 2.2;          // easing strength (1–4)
 
-  /**********************************************************
-   * PANEL HTML
-   **********************************************************/
-  const panel = document.createElement('div');
-  panel.id = 'aive-root';
-  panel.innerHTML = `
-    <div id="aive-header">
-      <span>AIVE</span>
-      <span id="aive-help">?</span>
-    </div>
+  // --------------------------------------------------
+  // EASING (REAL BLIND FEEL)
+  // --------------------------------------------------
 
-    <div class="aive-body">
-      ${slider('Brightness','brightness',0.5,2,0.01,1)}
-      ${slider('Contrast','contrast',0.5,2,0.01,1)}
-      ${slider('Saturation','saturate',0,3,0.01,1)}
-      ${slider('Sepia','sepia',0,1,0.01,0)}
-      ${slider('Hue','hue',-180,180,1,0)}
-      ${slider('Zoom','zoom',0.5,3,0.01,1)}
-
-      <div class="aive-buttons">
-        <button id="aive-auto">Auto</button>
-        <button id="aive-reset">Reset</button>
-        <button id="aive-h">H</button>
-        <button id="aive-v">V</button>
-      </div>
-
-      <div class="aive-buttons">
-        <button id="aive-disable-tab">Disable Tab</button>
-        <button id="aive-blacklist">Blacklist Domain</button>
-      </div>
-    </div>
-
-    <div id="aive-help-modal">
-      <div>
-        <h3>AIVE Help</h3>
-        <ul>
-          <li>Hover header to expand / collapse</li>
-          <li>Drag header to move</li>
-          <li>Disable Tab = temporary</li>
-          <li>Blacklist Domain = permanent</li>
-        </ul>
-        <button id="aive-help-close">Close</button>
-      </div>
-    </div>
-  `;
-
-  /**********************************************************
-   * STATE
-   **********************************************************/
-  let video = null;
-  let dragging = false;
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
-
-  const state = {
-    brightness: 1,
-    contrast: 1,
-    saturate: 1,
-    sepia: 0,
-    hue: 0,
-    zoom: 1,
-    mirrorH: false,
-    mirrorV: false
-  };
-
-  /**********************************************************
-   * VIDEO DETECTION
-   **********************************************************/
-  function findVideo() {
-    const v = document.querySelector('video');
-    if (v && v !== video) {
-      video = v;
-      applyFilters();
-    }
-  }
-  setInterval(findVideo, 1000);
-
-  /**********************************************************
-   * FILTER APPLICATION
-   **********************************************************/
-  function applyFilters() {
-    if (!video) return;
-
-    video.style.filter = `
-      brightness(${state.brightness})
-      contrast(${state.contrast})
-      saturate(${state.saturate})
-      sepia(${state.sepia})
-      hue-rotate(${state.hue}deg)
-    `.trim();
-
-    const sx = (state.mirrorH ? -1 : 1) * state.zoom;
-    const sy = (state.mirrorV ? -1 : 1) * state.zoom;
-    video.style.transform = `scale(${sx},${sy})`;
+  function easeOutWeighted(t) {
+    return 1 - Math.pow(1 - t, inertia);
   }
 
-  /**********************************************************
-   * SLIDERS
-   **********************************************************/
-  panel.querySelectorAll('.row input').forEach(input => {
-    const key = input.dataset.key;
-    const val = input.closest('.row').querySelector('.val');
+  // --------------------------------------------------
+  // PANEL
+  // --------------------------------------------------
 
-    input.addEventListener('input', () => {
-      state[key] = parseFloat(input.value);
-      val.textContent = input.value;
-      applyFilters();
-    });
-  });
+  function createPanel() {
+    const root = document.createElement("div");
+    root.id = "aive-root";
 
-  function syncSliders() {
-    panel.querySelectorAll('.row').forEach(row => {
-      const key = row.querySelector('input').dataset.key;
-      row.querySelector('input').value = state[key];
-      row.querySelector('.val').textContent = state[key];
-    });
-    applyFilters();
-  }
+    root.innerHTML = `
+      <div class="aive-panel">
+        <div class="aive-header">
+          <div class="aive-title">AIVE ?</div>
+        </div>
 
-  /**********************************************************
-   * BUTTONS
-   **********************************************************/
-  panel.querySelector('#aive-auto').onclick = () => {
-    state.brightness = 1.05;
-    state.contrast = 1.1;
-    state.saturate = 1.15;
-    syncSliders();
-  };
+        <div class="aive-clip">
+          <div class="aive-body">
 
-  panel.querySelector('#aive-reset').onclick = () => {
-    Object.assign(state, {
-      brightness: 1,
-      contrast: 1,
-      saturate: 1,
-      sepia: 0,
-      hue: 0,
-      zoom: 1,
-      mirrorH: false,
-      mirrorV: false
-    });
-    syncSliders();
-  };
+            <div class="aive-row">
+              <label>Brightness</label>
+              <input type="range">
+            </div>
 
-  panel.querySelector('#aive-h').onclick = () => {
-    state.mirrorH = !state.mirrorH;
-    applyFilters();
-  };
+            <div class="aive-row">
+              <label>Contrast</label>
+              <input type="range">
+            </div>
 
-  panel.querySelector('#aive-v').onclick = () => {
-    state.mirrorV = !state.mirrorV;
-    applyFilters();
-  };
+            <div class="aive-row">
+              <label>Saturation</label>
+              <input type="range">
+            </div>
 
-  panel.querySelector('#aive-disable-tab').onclick = () => {
-    panel.remove();
-  };
+            <div class="aive-row">
+              <label>
+                Animation Speed
+                <span class="aive-ms">${animDuration}ms</span>
+              </label>
+              <input
+                type="range"
+                min="100"
+                max="3000"
+                step="50"
+                value="${animDuration}"
+                class="aive-speed"
+              >
+            </div>
 
-  panel.querySelector('#aive-blacklist').onclick = async () => {
-    const list = await get(KEYS.BLACKLIST) || [];
-    if (!list.includes(DOMAIN)) {
-      list.push(DOMAIN);
-      await set({ [KEYS.BLACKLIST]: list });
-    }
-    panel.remove();
-  };
+            <div class="aive-row">
+              <label>
+                Blind Weight
+                <span class="aive-ms">${inertia.toFixed(1)}</span>
+              </label>
+              <input
+                type="range"
+                min="1"
+                max="4"
+                step="0.1"
+                value="${inertia}"
+                class="aive-inertia"
+              >
+            </div>
 
-  /**********************************************************
-   * HELP
-   **********************************************************/
-  const helpModal = panel.querySelector('#aive-help-modal');
-  panel.querySelector('#aive-help').onclick = () => helpModal.classList.add('show');
-  panel.querySelector('#aive-help-close').onclick = () => helpModal.classList.remove('show');
+            <div class="aive-buttons">
+              <button>Auto</button>
+              <button>Reset</button>
+              <button>Disable Tab</button>
+              <button>Blacklist Domain</button>
+            </div>
 
-  document.addEventListener('keydown', e => {
-    if (e.altKey && e.shiftKey && e.key.toLowerCase() === 'h') {
-      helpModal.classList.toggle('show');
-    }
-  });
-
-  /**********************************************************
-   * DRAGGING + PER-DOMAIN POSITION
-   **********************************************************/
-  const header = panel.querySelector('#aive-header');
-
-  header.addEventListener('mousedown', e => {
-    dragging = true;
-    dragOffsetX = e.clientX - panel.offsetLeft;
-    dragOffsetY = e.clientY - panel.offsetTop;
-    document.body.style.userSelect = 'none';
-  });
-
-  document.addEventListener('mousemove', e => {
-    if (!dragging) return;
-    panel.style.left = e.clientX - dragOffsetX + 'px';
-    panel.style.top  = e.clientY - dragOffsetY + 'px';
-  });
-
-  document.addEventListener('mouseup', async () => {
-    if (!dragging) return;
-    dragging = false;
-    document.body.style.userSelect = '';
-
-    const pos = await get(KEYS.POSITIONS) || {};
-    pos[DOMAIN] = {
-      x: panel.offsetLeft,
-      y: panel.offsetTop
-    };
-    await set({ [KEYS.POSITIONS]: pos });
-  });
-
-  /**********************************************************
-   * RESTORE POSITION
-   **********************************************************/
-  get(KEYS.POSITIONS).then(pos => {
-    if (pos && pos[DOMAIN]) {
-      panel.style.left = pos[DOMAIN].x + 'px';
-      panel.style.top  = pos[DOMAIN].y + 'px';
-    }
-  });
-
-  /**********************************************************
-   * BLACKLIST CHECK (FINAL)
-   **********************************************************/
-  get(KEYS.BLACKLIST).then(list => {
-    if (Array.isArray(list) && list.includes(DOMAIN)) return;
-    document.body.appendChild(panel);
-  });
-
-  /**********************************************************
-   * UTIL
-   **********************************************************/
-  function slider(label, key, min, max, step, def) {
-    return `
-      <div class="row">
-        <label>${label}</label>
-        <input type="range" min="${min}" max="${max}" step="${step}" value="${def}" data-key="${key}">
-        <span class="val">${def}</span>
+          </div>
+        </div>
       </div>
     `;
+
+    document.body.appendChild(root);
+
+    enableBlind(root);
+    enableControls(root);
+    makeDraggable(root);
   }
+
+  // --------------------------------------------------
+  // BLIND ANIMATION (FINAL FORM)
+  // --------------------------------------------------
+
+  function enableBlind(root) {
+    const header = root.querySelector(".aive-header");
+    const clip = root.querySelector(".aive-clip");
+    const body = root.querySelector(".aive-body");
+
+    let expanded = false;
+    let animating = false;
+
+    function animate(toHeight) {
+      if (animating) return;
+      animating = true;
+
+      const startHeight = clip.offsetHeight;
+      const delta = toHeight - startHeight;
+      const startTime = performance.now();
+
+      function frame(now) {
+        if (!ALIVE) return;
+
+        const rawT = Math.min((now - startTime) / animDuration, 1);
+        const t = easeOutWeighted(rawT);
+
+        clip.style.height = startHeight + delta * t + "px";
+
+        if (rawT < 1) {
+          requestAnimationFrame(frame);
+        } else {
+          animating = false;
+        }
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    header.addEventListener("mouseenter", () => {
+      if (expanded) return;
+      expanded = true;
+      animate(body.scrollHeight);
+    });
+
+    root.addEventListener("mouseleave", () => {
+      if (!expanded) return;
+      expanded = false;
+      animate(0);
+    });
+  }
+
+  // --------------------------------------------------
+  // CONTROLS
+  // --------------------------------------------------
+
+  function enableControls(root) {
+    const speed = root.querySelector(".aive-speed");
+    const inertiaSlider = root.querySelector(".aive-inertia");
+    const labels = root.querySelectorAll(".aive-ms");
+
+    speed.addEventListener("input", () => {
+      animDuration = Number(speed.value);
+      labels[0].textContent = `${animDuration}ms`;
+    });
+
+    inertiaSlider.addEventListener("input", () => {
+      inertia = Number(inertiaSlider.value);
+      labels[1].textContent = inertia.toFixed(1);
+    });
+  }
+
+  // --------------------------------------------------
+  // DRAG
+  // --------------------------------------------------
+
+  function makeDraggable(root) {
+    const header = root.querySelector(".aive-header");
+    let ox = 0, oy = 0;
+
+    header.addEventListener("mousedown", e => {
+      ox = e.clientX - root.offsetLeft;
+      oy = e.clientY - root.offsetTop;
+
+      const move = e => {
+        root.style.left = e.clientX - ox + "px";
+        root.style.top = e.clientY - oy + "px";
+      };
+
+      const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+      };
+
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    });
+  }
+
+  // --------------------------------------------------
+  // INIT
+  // --------------------------------------------------
+
+  function waitForBody(cb) {
+    if (!ALIVE) return;
+    if (document.body) return cb();
+    requestAnimationFrame(() => waitForBody(cb));
+  }
+
+  waitForBody(createPanel);
 
 })();

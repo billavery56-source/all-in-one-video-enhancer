@@ -1,213 +1,145 @@
-/* =========================
-   ROOT PANEL
-   ========================= */
-
-@keyframes aive-glow {
-  0%   { box-shadow: 0 0 18px rgba(240,160,96,.18); }
-  50%  { box-shadow: 0 0 26px rgba(240,160,96,.32); }
-  100% { box-shadow: 0 0 18px rgba(240,160,96,.18); }
-}
+/* =========================================================
+   AIVE PANEL – CORE LAYOUT
+   ========================================================= */
 
 #aive-root {
   position: fixed;
-  top: 120px;
-  left: 40px;
-  width: 320px;
-
-  background: rgba(18,18,18,.88);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-
-  color: #eee;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-
-  border-radius: 14px;
+  top: 80px;
+  left: 20px;
   z-index: 999999;
 
-  animation: aive-glow 6s ease-in-out infinite;
-  transition:
-    box-shadow .35s ease,
-    transform .2s ease;
+  width: 260px;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --aive-anim-duration: 600ms; /* DEFAULT (overridden by JS) */
+  --aive-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
-/* Stronger glow on hover / interaction */
-#aive-root:hover {
+/* =========================================================
+   PANEL SHELL
+   ========================================================= */
+
+.aive-panel {
+  background: linear-gradient(180deg, #1b1b1b, #101010);
+  border-radius: 14px;
+  overflow: hidden;
   box-shadow:
-    0 0 38px rgba(240,160,96,.55),
-    0 12px 34px rgba(0,0,0,.7);
+    0 10px 30px rgba(0,0,0,.55),
+    inset 0 1px 0 rgba(255,255,255,.05);
 }
 
-/* =========================
-   HEADER
-   ========================= */
+/* =========================================================
+   HEADER (ALWAYS VISIBLE)
+   ========================================================= */
 
-#aive-header {
-  padding: 10px 14px;
-  font-weight: 600;
-  cursor: move;
+.aive-header {
+  height: 42px;
+  padding: 0 12px;
 
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
 
-  border-bottom: 1px solid rgba(255,255,255,.06);
+  cursor: grab;
+  user-select: none;
+
+  background: linear-gradient(180deg, #262626, #1a1a1a);
 }
 
-#aive-help {
+.aive-title {
+  color: #f0e890;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.aive-help {
+  color: #6aa8ff;
+  font-weight: bold;
   cursor: pointer;
-  color: #6fc7ff;
-  font-weight: 700;
 }
 
-/* =========================
-   BODY COLLAPSE
-   ========================= */
+/* =========================================================
+   BLIND / CLIP CONTAINER
+   ========================================================= */
+
+.aive-clip {
+  overflow: hidden;
+  height: 0;
+}
+
+#aive-root:hover .aive-clip {
+  max-height: 1000px; /* large enough for content */
+}
+
+
+/* =========================================================
+   EXPANDED STATE
+   ========================================================= */
+
+#aive-root:hover .aive-clip {
+  max-height: 1000px; /* big enough for all content */
+}
+
+/* =========================================================
+   PANEL BODY
+   ========================================================= */
 
 .aive-body {
-  overflow: hidden;
-  max-height: 0;
-  transition: max-height .5s cubic-bezier(.4,0,.2,1);
+  padding: 12px;
+  background: transparent;
 }
 
-#aive-root:hover .aive-body {
-  max-height: 800px;
-}
-
-/* =========================
+/* =========================================================
    SLIDERS
-   ========================= */
+   ========================================================= */
 
-.row {
-  padding: 8px 14px;
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: 8px;
-  align-items: center;
+.aive-row {
+  margin-bottom: 12px;
 }
 
-.row label {
-  grid-column: span 3;
+.aive-label {
   color: #f0a060;
   font-size: 13px;
+  margin-bottom: 4px;
 }
 
-.row input[type="range"] {
-  grid-column: span 2;
+.aive-range {
+  width: 100%;
 }
 
-.val {
-  font-size: 12px;
-  opacity: .85;
-  text-align: right;
-}
-
-/* =========================
-   GLASSY BUTTONS
-   ========================= */
+/* =========================================================
+   BUTTONS
+   ========================================================= */
 
 .aive-buttons {
-  padding: 14px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
-.aive-buttons button {
-  position: relative;
-  padding: 10px 0;
+.aive-btn {
+  border-radius: 10px;
+  padding: 8px 0;
 
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,.15);
+  background: linear-gradient(
+    180deg,
+    rgba(40,40,40,.9),
+    rgba(20,20,20,.9)
+  );
 
-  background:
-    linear-gradient(
-      135deg,
-      rgba(255,255,255,.08),
-      rgba(255,255,255,.02)
-    );
-
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-
-  color: #cfcfcf;
-  font-weight: 600;
+  color: #ddd;
+  font-size: 13px;
+  border: none;
   cursor: pointer;
-  overflow: hidden;
-
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.25),
-    0 6px 14px rgba(0,0,0,.45);
 
   transition:
-    color .25s ease,
-    transform .2s ease,
-    box-shadow .25s ease;
+    color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
 }
 
-/* Shimmer */
-.aive-buttons button::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(
-      120deg,
-      transparent 30%,
-      rgba(255,255,255,.28),
-      transparent 70%
-    );
-  transform: translateX(-120%);
-  transition: transform .6s ease;
-}
-
-.aive-buttons button:hover {
-  color: #ffe066;
-  transform: translateY(-1px);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.35),
-    0 12px 28px rgba(0,0,0,.65);
-}
-
-.aive-buttons button:hover::before {
-  transform: translateX(120%);
-}
-
-.aive-buttons button:active {
-  transform: translateY(0);
-  box-shadow: inset 0 2px 6px rgba(0,0,0,.6);
-}
-
-/* =========================
-   HELP MODAL
-   ========================= */
-
-#aive-help-modal {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.6);
-  z-index: 1000000;
-}
-
-#aive-help-modal.show {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-#aive-help-modal > * {
-  background: rgba(20,20,20,.95);
-  backdrop-filter: blur(16px);
-  border-radius: 14px;
-  padding: 20px;
-  box-shadow: 0 20px 40px rgba(0,0,0,.7);
-}
-
-#aive-help-modal h3 {
-  margin-top: 0;
-}
-
-#aive-help-modal ul {
-  margin: 10px 0;
-  padding-left: 18px;
+.aive-btn:hover {
+  color: #f0e890;
+  box-shadow: inset 0 0 12px rgba(255,255,255,.15);
 }

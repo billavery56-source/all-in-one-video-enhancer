@@ -1,0 +1,148 @@
+:root {
+  --bg: #0f1115;
+  --card: #171a21;
+  --text: #e9eef7;
+  --muted: #a7b0c0;
+  --border: #262b36;
+  --btn: #2a3140;
+  --danger: #7a2b2b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  width: 370px;
+}
+
+.wrap { padding: 12px; }
+
+header { margin-bottom: 10px; }
+.title { font-weight: 900; font-size: 14px; letter-spacing: 0.2px; }
+.sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 6px;
+  border-radius: 10px;
+}
+
+.row.col { flex-direction: column; align-items: stretch; }
+.row.between { justify-content: space-between; padding: 0; }
+
+.hint {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 6px 6px 6px;
+  line-height: 1.35;
+}
+
+.pill {
+  border: 1px solid var(--border);
+  background: #10131a;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.text, select, input[type="range"] { width: 100%; }
+
+.text {
+  background: #10131a;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 10px;
+  outline: none;
+}
+
+.text:focus { border-color: #3a445a; }
+
+button {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--btn);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 10px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+button:hover { border-color: #3a445a; }
+button.secondary { background: transparent; }
+button.danger { background: var(--danger); }
+
+.btnRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.status {
+  min-height: 28px;
+  padding: 6px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+/* Hover hint bar (animated) */
+.hoverHint {
+  margin-top: 10px;
+  min-height: 34px;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #10131a;
+  color: var(--muted);
+  overflow: hidden;
+}
+
+.hoverHintInner {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  align-items: center;
+  gap: 10px;
+
+  opacity: 0.25;
+  transform: translateY(2px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.hoverHint.show .hoverHintInner {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.hoverHintIcon {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  font-size: 14px;
+}
+
+.hoverHintText {
+  font-size: 11px;
+  line-height: 1.35;
+}
