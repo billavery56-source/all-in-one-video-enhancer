@@ -1,5 +1,5 @@
 // ======================================================
-// AIVE – CONTENT SCRIPT (STABLE BLIND + STATE SAFE)
+// AIVE – CONTENT SCRIPT (WITH EDGE DOCKING)
 // ======================================================
 
 (() => {
@@ -13,7 +13,7 @@
   window.addEventListener("beforeunload", () => (ALIVE = false));
 
   // --------------------------------------------------
-  // SAFE STORAGE
+  // STORAGE
   // --------------------------------------------------
 
   const STORE =
@@ -40,6 +40,7 @@
   const DOMAIN = location.hostname;
   const STATE_KEY = `aive_state_${DOMAIN}`;
   const BLACKLIST_KEY = "aive_blacklist";
+  const DOCK_KEY = `aive_dock_${DOMAIN}`;
 
   // --------------------------------------------------
   // VIDEO
@@ -82,7 +83,7 @@
   }
 
   // --------------------------------------------------
-  // BLIND CONFIG (SINGLE SOURCE OF TRUTH)
+  // BLIND CONFIG
   // --------------------------------------------------
 
   const blindConfig = {
@@ -108,7 +109,7 @@
       </div>`;
   }
 
-  function createPanel() {
+  function createPanel(dock) {
     ROOT = document.createElement("div");
     ROOT.id = "aive-root";
 
@@ -147,6 +148,7 @@
     `;
 
     document.body.appendChild(ROOT);
+    applyDock(dock);
     wireControls();
     blind(ROOT);
     drag(ROOT);
@@ -220,7 +222,7 @@
   }
 
   // --------------------------------------------------
-  // BLIND ANIMATION (FIXED)
+  // BLIND
   // --------------------------------------------------
 
   function blind(root) {
@@ -228,9 +230,7 @@
     const clip = root.querySelector(".aive-clip");
     const body = root.querySelector(".aive-body");
 
-    let open = false;
-    let anim = false;
-    let timer = null;
+    let open = false, anim = false, timer;
 
     function animate(to) {
       if (anim) return;
@@ -246,29 +246,46 @@
         if (t < 1) requestAnimationFrame(step);
         else anim = false;
       }
-
       requestAnimationFrame(step);
     }
 
-    header.addEventListener("mouseenter", () => {
+    header.onmouseenter = () => {
       clearTimeout(timer);
       if (!open) {
         open = true;
         animate(body.scrollHeight);
       }
-    });
+    };
 
-    root.addEventListener("mouseleave", () => {
+    root.onmouseleave = () => {
       if (!open) return;
       timer = setTimeout(() => {
         open = false;
         animate(0);
       }, blindConfig.delayMS);
-    });
+    };
   }
 
   // --------------------------------------------------
-  // DRAG
+  // DOCKING
+  // --------------------------------------------------
+
+  const SNAP_PX = 24;
+
+  function applyDock(dock) {
+    if (!dock) return;
+    ROOT.style.left = dock.left;
+    ROOT.style.top = dock.top;
+    ROOT.style.right = dock.right;
+    ROOT.style.bottom = dock.bottom;
+  }
+
+  function saveDock(dock) {
+    storageSet({ [DOCK_KEY]: dock });
+  }
+
+  // --------------------------------------------------
+  // DRAG + SNAP
   // --------------------------------------------------
 
   function drag(root) {
@@ -276,6 +293,7 @@
     let ox, oy;
 
     h.onmousedown = e => {
+      root.style.right = root.style.bottom = "";
       ox = e.clientX - root.offsetLeft;
       oy = e.clientY - root.offsetTop;
 
@@ -284,8 +302,30 @@
         root.style.top = e.clientY - oy + "px";
       };
 
-      document.onmouseup = () => (document.onmousemove = null);
+      document.onmouseup = () => {
+        document.onmousemove = null;
+        snapToEdge();
+      };
     };
+
+    function snapToEdge() {
+      const r = root.getBoundingClientRect();
+      const w = innerWidth;
+      const h = innerHeight;
+      let dock = null;
+
+      if (r.left < SNAP_PX) dock = { left: "10px", top: r.top + "px" };
+      else if (w - r.right < SNAP_PX) dock = { right: "10px", top: r.top + "px" };
+      else if (r.top < SNAP_PX) dock = { top: "10px", left: r.left + "px" };
+      else if (h - r.bottom < SNAP_PX) dock = { bottom: "10px", left: r.left + "px" };
+
+      if (dock) {
+        applyDock(dock);
+        saveDock(dock);
+      } else {
+        saveDock(null);
+      }
+    }
   }
 
   // --------------------------------------------------
@@ -308,14 +348,15 @@
 
   Promise.all([
     storageGet(BLACKLIST_KEY),
-    storageGet(STATE_KEY)
-  ]).then(([blacklist, saved]) => {
+    storageGet(STATE_KEY),
+    storageGet(DOCK_KEY)
+  ]).then(([blacklist, saved, dock]) => {
     if (Array.isArray(blacklist) && blacklist.includes(DOMAIN)) return;
     if (saved && typeof saved === "object") Object.assign(state, saved);
 
     const wait = () => {
       if (!ALIVE) return;
-      if (document.body) createPanel();
+      if (document.body) createPanel(dock);
       else requestAnimationFrame(wait);
     };
     wait();
