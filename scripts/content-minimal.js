@@ -1,5 +1,5 @@
 // ======================================================
-// AIVE – CONTENT SCRIPT (STABLE BLIND + CONTROLS)
+// AIVE – CONTENT SCRIPT (STABLE BLIND + STATE SAFE)
 // ======================================================
 
 (() => {
@@ -38,7 +38,8 @@
     });
 
   const DOMAIN = location.hostname;
-  let BLACKLIST = [];
+  const STATE_KEY = `aive_state_${DOMAIN}`;
+  const BLACKLIST_KEY = "aive_blacklist";
 
   // --------------------------------------------------
   // VIDEO
@@ -76,15 +77,21 @@
     `;
   }
 
+  function saveState() {
+    storageSet({ [STATE_KEY]: state });
+  }
+
   // --------------------------------------------------
-  // BLIND CONFIG (GLOBAL + SAFE)
+  // BLIND CONFIG (SINGLE SOURCE OF TRUTH)
   // --------------------------------------------------
 
-  let animMS  = 1200;
-  let inertia = 2.4;
-  let delayMS = 600;
+  const blindConfig = {
+    animMS: 1200,
+    inertia: 2.4,
+    delayMS: 600
+  };
 
-  const ease = t => 1 - Math.pow(1 - t, inertia);
+  const ease = t => 1 - Math.pow(1 - t, blindConfig.inertia);
 
   // --------------------------------------------------
   // PANEL
@@ -95,9 +102,8 @@
   function slider(label, key, min, max, step, val) {
     return `
       <div class="aive-row">
-        <label>${label}<span class="aive-val">${val}</span></label>
-        <input type="range"
-          data-key="${key}"
+        <label>${label} <span class="aive-val">${val}</span></label>
+        <input type="range" data-key="${key}"
           min="${min}" max="${max}" step="${step}" value="${val}">
       </div>`;
   }
@@ -113,20 +119,20 @@
         <div class="aive-clip">
           <div class="aive-body">
 
-            ${slider("Brightness","brightness",0,2,0.01,1)}
-            ${slider("Contrast","contrast",0,2,0.01,1)}
-            ${slider("Saturation","saturation",0,2,0.01,1)}
-            ${slider("Sepia","sepia",0,1,0.01,0)}
-            ${slider("Zoom","zoom",1,2,0.01,1)}
+            ${slider("Brightness","brightness",0,2,0.01,state.brightness)}
+            ${slider("Contrast","contrast",0,2,0.01,state.contrast)}
+            ${slider("Saturation","saturation",0,2,0.01,state.saturation)}
+            ${slider("Sepia","sepia",0,1,0.01,state.sepia)}
+            ${slider("Zoom","zoom",1,2,0.01,state.zoom)}
 
             <div class="aive-row">
               <label>Flip Horizontal</label>
               <button class="aive-flip">Flip</button>
             </div>
 
-            ${slider("Animation Speed","speed",100,3000,50,animMS)}
-            ${slider("Blind Weight","inertia",1,4,0.1,inertia)}
-            ${slider("Collapse Delay","delay",0,2000,50,delayMS)}
+            ${slider("Animation Speed","speed",100,3000,50,blindConfig.animMS)}
+            ${slider("Blind Weight","inertia",1,4,0.1,blindConfig.inertia)}
+            ${slider("Collapse Delay","delay",0,2000,50,blindConfig.delayMS)}
 
             <div class="aive-buttons">
               <button class="aive-auto">Auto</button>
@@ -144,6 +150,7 @@
     wireControls();
     blind(ROOT);
     drag(ROOT);
+    applyEffects();
   }
 
   // --------------------------------------------------
@@ -160,49 +167,56 @@
         if (k in state) {
           state[k] = v;
           applyEffects();
+          saveState();
         }
-        if (k === "speed") animMS = v;
-        if (k === "inertia") inertia = v;
-        if (k === "delay") delayMS = v;
+
+        if (k === "speed") blindConfig.animMS = v;
+        if (k === "inertia") blindConfig.inertia = v;
+        if (k === "delay") blindConfig.delayMS = v;
       };
     });
 
     ROOT.querySelector(".aive-flip").onclick = () => {
       state.flip = !state.flip;
       applyEffects();
+      saveState();
     };
 
     ROOT.querySelector(".aive-reset").onclick = () => {
-      state.brightness = 1;
-      state.contrast = 1;
-      state.saturation = 1;
-      state.sepia = 0;
-      state.zoom = 1;
-      state.flip = false;
-
-      ROOT.querySelectorAll("input[type=range]").forEach(r => {
-        const k = r.dataset.key;
-        r.value = state[k] ?? r.value;
-        r.dispatchEvent(new Event("input"));
+      Object.assign(state, {
+        brightness: 1,
+        contrast: 1,
+        saturation: 1,
+        sepia: 0,
+        zoom: 1,
+        flip: false
       });
+      updateSliders();
+      applyEffects();
+      saveState();
     };
 
     ROOT.querySelector(".aive-auto").onclick = () => {
       state.brightness = 1.1;
       state.contrast = 1.1;
       state.saturation = 1.15;
-
-      ROOT.querySelectorAll("input[type=range]").forEach(r => {
-        if (r.dataset.key in state) {
-          r.value = state[r.dataset.key];
-          r.dispatchEvent(new Event("input"));
-        }
-      });
+      updateSliders();
+      applyEffects();
+      saveState();
     };
 
     ROOT.querySelector(".aive-disable").onclick = () => ROOT.remove();
+    ROOT.querySelector(".aive-blacklist").onclick = blacklistDomain;
+  }
 
-    ROOT.querySelector(".aive-blacklist").onclick = openBlacklist;
+  function updateSliders() {
+    ROOT.querySelectorAll("input[data-key]").forEach(r => {
+      const k = r.dataset.key;
+      if (k in state) {
+        r.value = state[k];
+        r.previousElementSibling.querySelector(".aive-val").textContent = state[k];
+      }
+    });
   }
 
   // --------------------------------------------------
@@ -211,27 +225,28 @@
 
   function blind(root) {
     const header = root.querySelector(".aive-header");
-    const clip   = root.querySelector(".aive-clip");
-    const body   = root.querySelector(".aive-body");
+    const clip = root.querySelector(".aive-clip");
+    const body = root.querySelector(".aive-body");
 
     let open = false;
-    let animating = false;
-    let timer;
+    let anim = false;
+    let timer = null;
 
     function animate(to) {
-      if (animating) return;
-      animating = true;
+      if (anim) return;
+      anim = true;
 
       const from = clip.offsetHeight;
-      const dist = to - from;
+      const delta = to - from;
       const start = performance.now();
 
       function step(now) {
-        const t = Math.min((now - start) / animMS, 1);
-        clip.style.height = from + dist * ease(t) + "px";
+        const t = Math.min((now - start) / blindConfig.animMS, 1);
+        clip.style.height = from + delta * ease(t) + "px";
         if (t < 1) requestAnimationFrame(step);
-        else animating = false;
+        else anim = false;
       }
+
       requestAnimationFrame(step);
     }
 
@@ -245,11 +260,10 @@
 
     root.addEventListener("mouseleave", () => {
       if (!open) return;
-      clearTimeout(timer);
       timer = setTimeout(() => {
         open = false;
         animate(0);
-      }, Number.isFinite(delayMS) ? delayMS : 0);
+      }, blindConfig.delayMS);
     });
   }
 
@@ -267,70 +281,37 @@
 
       document.onmousemove = e => {
         root.style.left = e.clientX - ox + "px";
-        root.style.top  = e.clientY - oy + "px";
+        root.style.top = e.clientY - oy + "px";
       };
 
-      document.onmouseup = () => {
-        document.onmousemove = null;
-        document.onmouseup = null;
-      };
+      document.onmouseup = () => (document.onmousemove = null);
     };
   }
 
   // --------------------------------------------------
-  // BLACKLIST MODAL (CENTERED)
+  // BLACKLIST
   // --------------------------------------------------
 
-  function openBlacklist() {
-    const overlay = document.createElement("div");
-    overlay.id = "aive-bl-overlay";
-
-    overlay.innerHTML = `
-      <div class="aive-bl-box">
-        <h3>Blacklisted Domains</h3>
-        <ul>
-          ${BLACKLIST.map(d => `<li>${d} <button data-d="${d}">✕</button></li>`).join("")}
-        </ul>
-        <button id="aive-add-domain">Add Current Domain</button>
-        <button id="aive-close-bl">Close</button>
-      </div>
-    `;
-
-    document.body.appendChild(overlay);
-
-    overlay.onclick = e => {
-      if (e.target.dataset.d) {
-        BLACKLIST = BLACKLIST.filter(x => x !== e.target.dataset.d);
-        storageSet({ aive_blacklist: BLACKLIST }).then(() => overlay.remove());
+  function blacklistDomain() {
+    storageGet(BLACKLIST_KEY).then(list => {
+      const arr = Array.isArray(list) ? list : [];
+      if (!arr.includes(DOMAIN)) {
+        arr.push(DOMAIN);
+        storageSet({ [BLACKLIST_KEY]: arr }).then(() => ROOT.remove());
       }
-    };
-
-    overlay.querySelector("#aive-add-domain").onclick = () => {
-      if (!BLACKLIST.includes(DOMAIN)) {
-        BLACKLIST.push(DOMAIN);
-        storageSet({ aive_blacklist: BLACKLIST }).then(() => location.reload());
-      }
-    };
-
-    overlay.querySelector("#aive-close-bl").onclick = () => overlay.remove();
+    });
   }
-
-  // --------------------------------------------------
-  // SHORTCUTS
-  // --------------------------------------------------
-
-  document.addEventListener("keydown", e => {
-    if (e.altKey && e.shiftKey && e.code === "KeyB") openBlacklist();
-    if (e.altKey && e.shiftKey && e.code === "KeyA") ROOT?.remove();
-  });
 
   // --------------------------------------------------
   // INIT
   // --------------------------------------------------
 
-  storageGet("aive_blacklist").then(list => {
-    BLACKLIST = Array.isArray(list) ? list : [];
-    if (BLACKLIST.includes(DOMAIN)) return;
+  Promise.all([
+    storageGet(BLACKLIST_KEY),
+    storageGet(STATE_KEY)
+  ]).then(([blacklist, saved]) => {
+    if (Array.isArray(blacklist) && blacklist.includes(DOMAIN)) return;
+    if (saved && typeof saved === "object") Object.assign(state, saved);
 
     const wait = () => {
       if (!ALIVE) return;
