@@ -1,145 +1,118 @@
-/* =========================================================
-   AIVE PANEL – CORE LAYOUT
-   ========================================================= */
+/* =====================================================
+   AIVE PANEL – FINAL STABLE WINDOW BLIND
+   ===================================================== */
 
 #aive-root {
   position: fixed;
-  top: 80px;
   left: 20px;
-  z-index: 999999;
-
-  width: 260px;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-
-  --aive-anim-duration: 600ms; /* DEFAULT (overridden by JS) */
-  --aive-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  top: 20px;
+  z-index: 2147483647;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont;
+  user-select: none;
 }
 
-/* =========================================================
-   PANEL SHELL
-   ========================================================= */
+/* ---------------- Panel ---------------- */
 
 .aive-panel {
-  background: linear-gradient(180deg, #1b1b1b, #101010);
+  width: 280px;
+  background: rgba(18, 18, 18, 0.92);
   border-radius: 14px;
-  overflow: hidden;
   box-shadow:
-    0 10px 30px rgba(0,0,0,.55),
-    inset 0 1px 0 rgba(255,255,255,.05);
+    0 20px 40px rgba(0,0,0,.65),
+    inset 0 1px 0 rgba(255,255,255,.06);
+  overflow: hidden;
 }
 
-/* =========================================================
-   HEADER (ALWAYS VISIBLE)
-   ========================================================= */
+/* ---------------- Header ---------------- */
 
 .aive-header {
-  height: 42px;
-  padding: 0 12px;
-
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-
-  cursor: grab;
-  user-select: none;
-
-  background: linear-gradient(180deg, #262626, #1a1a1a);
-}
-
-.aive-title {
+  padding: 10px 14px;
+  font-weight: 700;
   color: #f0e890;
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.aive-help {
-  color: #6aa8ff;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-/* =========================================================
-   BLIND / CLIP CONTAINER
-   ========================================================= */
-
-.aive-clip {
-  overflow: hidden;
-  height: 0;
-}
-
-#aive-root:hover .aive-clip {
-  max-height: 1000px; /* large enough for content */
-}
-
-
-/* =========================================================
-   EXPANDED STATE
-   ========================================================= */
-
-#aive-root:hover .aive-clip {
-  max-height: 1000px; /* big enough for all content */
-}
-
-/* =========================================================
-   PANEL BODY
-   ========================================================= */
-
-.aive-body {
-  padding: 12px;
-  background: transparent;
-}
-
-/* =========================================================
-   SLIDERS
-   ========================================================= */
-
-.aive-row {
-  margin-bottom: 12px;
-}
-
-.aive-label {
-  color: #f0a060;
-  font-size: 13px;
-  margin-bottom: 4px;
-}
-
-.aive-range {
-  width: 100%;
-}
-
-/* =========================================================
-   BUTTONS
-   ========================================================= */
-
-.aive-buttons {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.aive-btn {
-  border-radius: 10px;
-  padding: 8px 0;
-
+  cursor: grab;
   background: linear-gradient(
     180deg,
     rgba(40,40,40,.9),
     rgba(20,20,20,.9)
   );
-
-  color: #ddd;
-  font-size: 13px;
-  border: none;
-  cursor: pointer;
-
-  transition:
-    color 160ms ease,
-    box-shadow 160ms ease,
-    background 160ms ease;
 }
 
-.aive-btn:hover {
-  color: #f0e890;
-  box-shadow: inset 0 0 12px rgba(255,255,255,.15);
+/* ---------------- Blind container ---------------- */
+
+.aive-clip {
+  height: 0;                  /* CLOSED */
+  overflow: hidden;
+  transition: height var(--aive-blind-ms, 1200ms)
+              cubic-bezier(.22,.61,.36,1);
+}
+
+/* ---------------- Body ---------------- */
+
+.aive-body {
+  padding: 12px;
+}
+
+/* ---------------- Rows ---------------- */
+
+.aive-row {
+  margin-bottom: 10px;
+}
+
+.aive-row label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #e0c870;
+  margin-bottom: 4px;
+}
+
+.aive-val {
+  color: #f5f5f5;
+}
+
+/* ---------------- Sliders ---------------- */
+
+.aive-row input[type="range"] {
+  width: 100%;
+  accent-color: #ff5252;
+}
+
+/* ---------------- Buttons ---------------- */
+
+.aive-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.aive-panel button {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  color: #cfcfcf;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(50,50,50,.9),
+      rgba(25,25,25,.9)
+    );
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.08),
+    0 6px 14px rgba(0,0,0,.6);
+
+  transition:
+    color .2s ease,
+    transform .15s ease,
+    box-shadow .15s ease;
+}
+
+.aive-panel button:hover {
+  color: #fff200;
+  transform: translateY(-1px);
 }

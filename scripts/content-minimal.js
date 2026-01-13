@@ -1,5 +1,5 @@
 // ======================================================
-// AIVE – CONTENT SCRIPT (STABLE + CENTERED BLACKLIST)
+// AIVE – CONTENT SCRIPT (STABLE BLIND + CONTROLS)
 // ======================================================
 
 (() => {
@@ -15,6 +15,7 @@
   // --------------------------------------------------
   // SAFE STORAGE
   // --------------------------------------------------
+
   const STORE =
     typeof chrome !== "undefined" &&
     chrome.storage &&
@@ -25,38 +26,30 @@
   const storageGet = key =>
     new Promise(r => {
       if (!STORE) return r(undefined);
-      try {
-        STORE.get(key, o => r(o[key]));
-      } catch {
-        r(undefined);
-      }
+      try { STORE.get(key, o => r(o[key])); }
+      catch { r(undefined); }
     });
 
   const storageSet = obj =>
     new Promise(r => {
       if (!STORE) return r();
-      try {
-        STORE.set(obj, r);
-      } catch {
-        r();
-      }
+      try { STORE.set(obj, r); }
+      catch { r(); }
     });
 
   const DOMAIN = location.hostname;
-  const BLACKLIST_KEY = "aive_blacklist";
-
   let BLACKLIST = [];
-  let TAB_DISABLED = false;
-  let ROOT = null;
 
   // --------------------------------------------------
   // VIDEO
   // --------------------------------------------------
+
   const getVideo = () => document.querySelector("video");
 
   // --------------------------------------------------
   // EFFECT STATE
   // --------------------------------------------------
+
   const state = {
     brightness: 1,
     contrast: 1,
@@ -77,30 +70,45 @@
       sepia(${state.sepia})
     `;
 
-    v.style.transform = `scale(${state.zoom}) scaleX(${state.flip ? -1 : 1})`;
+    v.style.transform = `
+      scale(${state.zoom})
+      scaleX(${state.flip ? -1 : 1})
+    `;
   }
+
+  // --------------------------------------------------
+  // BLIND CONFIG (GLOBAL + SAFE)
+  // --------------------------------------------------
+
+  let animMS  = 1200;
+  let inertia = 2.4;
+  let delayMS = 600;
+
+  const ease = t => 1 - Math.pow(1 - t, inertia);
 
   // --------------------------------------------------
   // PANEL
   // --------------------------------------------------
+
+  let ROOT;
+
   function slider(label, key, min, max, step, val) {
     return `
       <div class="aive-row">
-        <label>${label} <span class="aive-val">${val}</span></label>
-        <input type="range" data-key="${key}"
+        <label>${label}<span class="aive-val">${val}</span></label>
+        <input type="range"
+          data-key="${key}"
           min="${min}" max="${max}" step="${step}" value="${val}">
       </div>`;
   }
 
   function createPanel() {
-    if (ROOT || TAB_DISABLED) return;
-
     ROOT = document.createElement("div");
     ROOT.id = "aive-root";
 
     ROOT.innerHTML = `
       <div class="aive-panel">
-        <div class="aive-header">AIVE</div>
+        <div class="aive-header">AIVE ?</div>
 
         <div class="aive-clip">
           <div class="aive-body">
@@ -115,6 +123,10 @@
               <label>Flip Horizontal</label>
               <button class="aive-flip">Flip</button>
             </div>
+
+            ${slider("Animation Speed","speed",100,3000,50,animMS)}
+            ${slider("Blind Weight","inertia",1,4,0.1,inertia)}
+            ${slider("Collapse Delay","delay",0,2000,50,delayMS)}
 
             <div class="aive-buttons">
               <button class="aive-auto">Auto</button>
@@ -134,26 +146,24 @@
     drag(ROOT);
   }
 
-  function destroyPanel() {
-    if (ROOT) {
-      ROOT.remove();
-      ROOT = null;
-    }
-  }
-
   // --------------------------------------------------
   // CONTROLS
   // --------------------------------------------------
+
   function wireControls() {
     ROOT.querySelectorAll("input[type=range]").forEach(r => {
       r.oninput = () => {
         const k = r.dataset.key;
         const v = Number(r.value);
         r.previousElementSibling.querySelector(".aive-val").textContent = v;
+
         if (k in state) {
           state[k] = v;
           applyEffects();
         }
+        if (k === "speed") animMS = v;
+        if (k === "inertia") inertia = v;
+        if (k === "delay") delayMS = v;
       };
     });
 
@@ -163,60 +173,90 @@
     };
 
     ROOT.querySelector(".aive-reset").onclick = () => {
-      Object.assign(state, {
-        brightness: 1,
-        contrast: 1,
-        saturation: 1,
-        sepia: 0,
-        zoom: 1,
-        flip: false
+      state.brightness = 1;
+      state.contrast = 1;
+      state.saturation = 1;
+      state.sepia = 0;
+      state.zoom = 1;
+      state.flip = false;
+
+      ROOT.querySelectorAll("input[type=range]").forEach(r => {
+        const k = r.dataset.key;
+        r.value = state[k] ?? r.value;
+        r.dispatchEvent(new Event("input"));
       });
-      ROOT.querySelectorAll("input[type=range]").forEach(r =>
-        r.dispatchEvent(new Event("input"))
-      );
     };
 
     ROOT.querySelector(".aive-auto").onclick = () => {
       state.brightness = 1.1;
       state.contrast = 1.1;
       state.saturation = 1.15;
-      applyEffects();
+
+      ROOT.querySelectorAll("input[type=range]").forEach(r => {
+        if (r.dataset.key in state) {
+          r.value = state[r.dataset.key];
+          r.dispatchEvent(new Event("input"));
+        }
+      });
     };
 
-    ROOT.querySelector(".aive-disable").onclick = () => {
-      TAB_DISABLED = true;
-      destroyPanel();
-    };
+    ROOT.querySelector(".aive-disable").onclick = () => ROOT.remove();
 
-    ROOT.querySelector(".aive-blacklist").onclick = async () => {
-      if (!BLACKLIST.includes(DOMAIN)) {
-        BLACKLIST.push(DOMAIN);
-        await storageSet({ [BLACKLIST_KEY]: BLACKLIST });
-      }
-      destroyPanel();
-    };
+    ROOT.querySelector(".aive-blacklist").onclick = openBlacklist;
   }
 
   // --------------------------------------------------
-  // BLIND (NO CHANGES)
+  // BLIND ANIMATION (FIXED)
   // --------------------------------------------------
+
   function blind(root) {
     const header = root.querySelector(".aive-header");
-    const clip = root.querySelector(".aive-clip");
-    const body = root.querySelector(".aive-body");
+    const clip   = root.querySelector(".aive-clip");
+    const body   = root.querySelector(".aive-body");
 
-    header.onmouseenter = () => {
-      clip.style.height = body.scrollHeight + "px";
-    };
+    let open = false;
+    let animating = false;
+    let timer;
 
-    root.onmouseleave = () => {
-      clip.style.height = "0px";
-    };
+    function animate(to) {
+      if (animating) return;
+      animating = true;
+
+      const from = clip.offsetHeight;
+      const dist = to - from;
+      const start = performance.now();
+
+      function step(now) {
+        const t = Math.min((now - start) / animMS, 1);
+        clip.style.height = from + dist * ease(t) + "px";
+        if (t < 1) requestAnimationFrame(step);
+        else animating = false;
+      }
+      requestAnimationFrame(step);
+    }
+
+    header.addEventListener("mouseenter", () => {
+      clearTimeout(timer);
+      if (!open) {
+        open = true;
+        animate(body.scrollHeight);
+      }
+    });
+
+    root.addEventListener("mouseleave", () => {
+      if (!open) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        open = false;
+        animate(0);
+      }, Number.isFinite(delayMS) ? delayMS : 0);
+    });
   }
 
   // --------------------------------------------------
   // DRAG
   // --------------------------------------------------
+
   function drag(root) {
     const h = root.querySelector(".aive-header");
     let ox, oy;
@@ -227,7 +267,7 @@
 
       document.onmousemove = e => {
         root.style.left = e.clientX - ox + "px";
-        root.style.top = e.clientY - oy + "px";
+        root.style.top  = e.clientY - oy + "px";
       };
 
       document.onmouseup = () => {
@@ -240,73 +280,55 @@
   // --------------------------------------------------
   // BLACKLIST MODAL (CENTERED)
   // --------------------------------------------------
-  function openBlacklist() {
-    if (document.getElementById("aive-bl-overlay")) return;
 
+  function openBlacklist() {
     const overlay = document.createElement("div");
     overlay.id = "aive-bl-overlay";
-    overlay.style.cssText = `
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.6);
-      z-index: 2147483647;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    `;
 
-    const box = document.createElement("div");
-    box.style.cssText = `
-      background: #111;
-      color: #fff;
-      padding: 16px 20px;
-      border-radius: 12px;
-      width: 420px;
-      max-height: 70vh;
-      overflow: auto;
-      box-shadow: 0 20px 60px rgba(0,0,0,.7);
-      font-family: system-ui;
-    `;
-
-    box.innerHTML = `
-      <h3 style="margin-top:0">Blacklisted Domains</h3>
-      <ul style="padding-left:16px">
-        ${BLACKLIST.map(
-          d => `<li>${d} <button data-d="${d}">✕</button></li>`
-        ).join("")}
-      </ul>
-      <div style="margin-top:12px;text-align:right">
-        <button id="aive-bl-close">Close</button>
+    overlay.innerHTML = `
+      <div class="aive-bl-box">
+        <h3>Blacklisted Domains</h3>
+        <ul>
+          ${BLACKLIST.map(d => `<li>${d} <button data-d="${d}">✕</button></li>`).join("")}
+        </ul>
+        <button id="aive-add-domain">Add Current Domain</button>
+        <button id="aive-close-bl">Close</button>
       </div>
     `;
 
-    overlay.appendChild(box);
     document.body.appendChild(overlay);
 
     overlay.onclick = e => {
-      if (e.target === overlay) overlay.remove();
-      if (e.target.dataset?.d) {
+      if (e.target.dataset.d) {
         BLACKLIST = BLACKLIST.filter(x => x !== e.target.dataset.d);
-        storageSet({ [BLACKLIST_KEY]: BLACKLIST });
-        overlay.remove();
-        openBlacklist();
+        storageSet({ aive_blacklist: BLACKLIST }).then(() => overlay.remove());
       }
     };
 
-    box.querySelector("#aive-bl-close").onclick = () => overlay.remove();
+    overlay.querySelector("#aive-add-domain").onclick = () => {
+      if (!BLACKLIST.includes(DOMAIN)) {
+        BLACKLIST.push(DOMAIN);
+        storageSet({ aive_blacklist: BLACKLIST }).then(() => location.reload());
+      }
+    };
+
+    overlay.querySelector("#aive-close-bl").onclick = () => overlay.remove();
   }
 
   // --------------------------------------------------
   // SHORTCUTS
   // --------------------------------------------------
+
   document.addEventListener("keydown", e => {
     if (e.altKey && e.shiftKey && e.code === "KeyB") openBlacklist();
+    if (e.altKey && e.shiftKey && e.code === "KeyA") ROOT?.remove();
   });
 
   // --------------------------------------------------
   // INIT
   // --------------------------------------------------
-  storageGet(BLACKLIST_KEY).then(list => {
+
+  storageGet("aive_blacklist").then(list => {
     BLACKLIST = Array.isArray(list) ? list : [];
     if (BLACKLIST.includes(DOMAIN)) return;
 
