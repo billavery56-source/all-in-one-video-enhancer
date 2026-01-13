@@ -1,5 +1,5 @@
 // ======================================================
-// AIVE – CONTENT SCRIPT (FULL WORKING BUILD)
+// AIVE – CONTENT SCRIPT (STABLE + CENTERED BLACKLIST)
 // ======================================================
 
 (() => {
@@ -9,21 +9,54 @@
   window.__AIVE_LOADED__ = true;
 
   let ALIVE = true;
-  window.addEventListener("pagehide", () => ALIVE = false);
-  window.addEventListener("beforeunload", () => ALIVE = false);
+  window.addEventListener("pagehide", () => (ALIVE = false));
+  window.addEventListener("beforeunload", () => (ALIVE = false));
 
   // --------------------------------------------------
-  // VIDEO TARGET
+  // SAFE STORAGE
   // --------------------------------------------------
+  const STORE =
+    typeof chrome !== "undefined" &&
+    chrome.storage &&
+    chrome.storage.local
+      ? chrome.storage.local
+      : null;
 
-  function getVideo() {
-    return document.querySelector("video");
-  }
+  const storageGet = key =>
+    new Promise(r => {
+      if (!STORE) return r(undefined);
+      try {
+        STORE.get(key, o => r(o[key]));
+      } catch {
+        r(undefined);
+      }
+    });
+
+  const storageSet = obj =>
+    new Promise(r => {
+      if (!STORE) return r();
+      try {
+        STORE.set(obj, r);
+      } catch {
+        r();
+      }
+    });
+
+  const DOMAIN = location.hostname;
+  const BLACKLIST_KEY = "aive_blacklist";
+
+  let BLACKLIST = [];
+  let TAB_DISABLED = false;
+  let ROOT = null;
+
+  // --------------------------------------------------
+  // VIDEO
+  // --------------------------------------------------
+  const getVideo = () => document.querySelector("video");
 
   // --------------------------------------------------
   // EFFECT STATE
   // --------------------------------------------------
-
   const state = {
     brightness: 1,
     contrast: 1,
@@ -44,54 +77,44 @@
       sepia(${state.sepia})
     `;
 
-    v.style.transform = `
-      scale(${state.zoom})
-      scaleX(${state.flip ? -1 : 1})
-    `;
-    v.style.transformOrigin = "center center";
-  }
-
-  // --------------------------------------------------
-  // ANIMATION CONFIG
-  // --------------------------------------------------
-
-  let animDuration = 1200;
-  let inertia = 2.4;
-  let collapseDelay = 600;
-
-  function easeOut(t) {
-    return 1 - Math.pow(1 - t, inertia);
+    v.style.transform = `scale(${state.zoom}) scaleX(${state.flip ? -1 : 1})`;
   }
 
   // --------------------------------------------------
   // PANEL
   // --------------------------------------------------
+  function slider(label, key, min, max, step, val) {
+    return `
+      <div class="aive-row">
+        <label>${label} <span class="aive-val">${val}</span></label>
+        <input type="range" data-key="${key}"
+          min="${min}" max="${max}" step="${step}" value="${val}">
+      </div>`;
+  }
 
   function createPanel() {
-    const root = document.createElement("div");
-    root.id = "aive-root";
+    if (ROOT || TAB_DISABLED) return;
 
-    root.innerHTML = `
+    ROOT = document.createElement("div");
+    ROOT.id = "aive-root";
+
+    ROOT.innerHTML = `
       <div class="aive-panel">
-        <div class="aive-header">AIVE ?</div>
+        <div class="aive-header">AIVE</div>
 
         <div class="aive-clip">
           <div class="aive-body">
 
-            ${slider("Brightness", "brightness", 0, 2, 0.01, 1)}
-            ${slider("Contrast", "contrast", 0, 2, 0.01, 1)}
-            ${slider("Saturation", "saturation", 0, 2, 0.01, 1)}
-            ${slider("Sepia", "sepia", 0, 1, 0.01, 0)}
-            ${slider("Zoom", "zoom", 1, 2, 0.01, 1)}
+            ${slider("Brightness","brightness",0,2,0.01,1)}
+            ${slider("Contrast","contrast",0,2,0.01,1)}
+            ${slider("Saturation","saturation",0,2,0.01,1)}
+            ${slider("Sepia","sepia",0,1,0.01,0)}
+            ${slider("Zoom","zoom",1,2,0.01,1)}
 
             <div class="aive-row">
               <label>Flip Horizontal</label>
               <button class="aive-flip">Flip</button>
             </div>
-
-            ${slider("Animation Speed", "speed", 100, 3000, 50, animDuration)}
-            ${slider("Blind Weight", "inertia", 1, 4, 0.1, inertia)}
-            ${slider("Collapse Delay", "delay", 0, 2000, 50, collapseDelay)}
 
             <div class="aive-buttons">
               <button class="aive-auto">Auto</button>
@@ -105,52 +128,41 @@
       </div>
     `;
 
-    document.body.appendChild(root);
-
-    wireControls(root);
-    enableBlind(root);
-    makeDraggable(root);
+    document.body.appendChild(ROOT);
+    wireControls();
+    blind(ROOT);
+    drag(ROOT);
   }
 
-  function slider(label, key, min, max, step, value) {
-    return `
-      <div class="aive-row">
-        <label>${label} <span class="aive-val">${value}</span></label>
-        <input type="range"
-          data-key="${key}"
-          min="${min}" max="${max}" step="${step}" value="${value}">
-      </div>
-    `;
+  function destroyPanel() {
+    if (ROOT) {
+      ROOT.remove();
+      ROOT = null;
+    }
   }
 
   // --------------------------------------------------
   // CONTROLS
   // --------------------------------------------------
-
-  function wireControls(root) {
-    root.querySelectorAll("input[type=range]").forEach(sl => {
-      sl.addEventListener("input", () => {
-        const key = sl.dataset.key;
-        const val = Number(sl.value);
-        sl.previousElementSibling.querySelector(".aive-val").textContent = val;
-
-        if (key in state) {
-          state[key] = val;
+  function wireControls() {
+    ROOT.querySelectorAll("input[type=range]").forEach(r => {
+      r.oninput = () => {
+        const k = r.dataset.key;
+        const v = Number(r.value);
+        r.previousElementSibling.querySelector(".aive-val").textContent = v;
+        if (k in state) {
+          state[k] = v;
           applyEffects();
         }
-
-        if (key === "speed") animDuration = val;
-        if (key === "inertia") inertia = val;
-        if (key === "delay") collapseDelay = val;
-      });
+      };
     });
 
-    root.querySelector(".aive-flip").onclick = () => {
+    ROOT.querySelector(".aive-flip").onclick = () => {
       state.flip = !state.flip;
       applyEffects();
     };
 
-    root.querySelector(".aive-reset").onclick = () => {
+    ROOT.querySelector(".aive-reset").onclick = () => {
       Object.assign(state, {
         brightness: 1,
         contrast: 1,
@@ -159,80 +171,53 @@
         zoom: 1,
         flip: false
       });
-      root.querySelectorAll("input[type=range]").forEach(sl => {
-        sl.value = sl.getAttribute("value");
-        sl.dispatchEvent(new Event("input"));
-      });
+      ROOT.querySelectorAll("input[type=range]").forEach(r =>
+        r.dispatchEvent(new Event("input"))
+      );
     };
 
-    root.querySelector(".aive-auto").onclick = () => {
+    ROOT.querySelector(".aive-auto").onclick = () => {
       state.brightness = 1.1;
       state.contrast = 1.1;
       state.saturation = 1.15;
       applyEffects();
     };
 
-    root.querySelector(".aive-disable").onclick = () => {
-      root.remove();
+    ROOT.querySelector(".aive-disable").onclick = () => {
+      TAB_DISABLED = true;
+      destroyPanel();
     };
 
-    root.querySelector(".aive-blacklist").onclick = () => {
-      alert("Blacklist UI coming next step.");
+    ROOT.querySelector(".aive-blacklist").onclick = async () => {
+      if (!BLACKLIST.includes(DOMAIN)) {
+        BLACKLIST.push(DOMAIN);
+        await storageSet({ [BLACKLIST_KEY]: BLACKLIST });
+      }
+      destroyPanel();
     };
   }
 
   // --------------------------------------------------
-  // BLIND ANIMATION
+  // BLIND (NO CHANGES)
   // --------------------------------------------------
-
-  function enableBlind(root) {
+  function blind(root) {
     const header = root.querySelector(".aive-header");
     const clip = root.querySelector(".aive-clip");
     const body = root.querySelector(".aive-body");
 
-    let expanded = false;
-    let animating = false;
-    let timer = null;
-
-    function animate(to) {
-      if (animating) return;
-      animating = true;
-
-      const from = clip.offsetHeight;
-      const delta = to - from;
-      const start = performance.now();
-
-      function frame(now) {
-        const t = Math.min((now - start) / animDuration, 1);
-        clip.style.height = from + delta * easeOut(t) + "px";
-        if (t < 1) requestAnimationFrame(frame);
-        else animating = false;
-      }
-      requestAnimationFrame(frame);
-    }
-
     header.onmouseenter = () => {
-      clearTimeout(timer);
-      if (!expanded) {
-        expanded = true;
-        animate(body.scrollHeight);
-      }
+      clip.style.height = body.scrollHeight + "px";
     };
 
     root.onmouseleave = () => {
-      if (!expanded) return;
-      timer = setTimeout(() => {
-        expanded = false;
-        animate(0);
-      }, collapseDelay);
+      clip.style.height = "0px";
     };
   }
 
   // --------------------------------------------------
   // DRAG
   // --------------------------------------------------
-
-  function makeDraggable(root) {
+  function drag(root) {
     const h = root.querySelector(".aive-header");
     let ox, oy;
 
@@ -240,23 +225,97 @@
       ox = e.clientX - root.offsetLeft;
       oy = e.clientY - root.offsetTop;
 
-      document.onmousemove = e =>
-        root.style.cssText += `left:${e.clientX - ox}px;top:${e.clientY - oy}px;`;
+      document.onmousemove = e => {
+        root.style.left = e.clientX - ox + "px";
+        root.style.top = e.clientY - oy + "px";
+      };
 
-      document.onmouseup = () => document.onmousemove = null;
+      document.onmouseup = () => {
+        document.onmousemove = null;
+        document.onmouseup = null;
+      };
     };
   }
 
   // --------------------------------------------------
-  // INIT
+  // BLACKLIST MODAL (CENTERED)
   // --------------------------------------------------
+  function openBlacklist() {
+    if (document.getElementById("aive-bl-overlay")) return;
 
-  function waitForBody() {
-    if (!ALIVE) return;
-    if (document.body) createPanel();
-    else requestAnimationFrame(waitForBody);
+    const overlay = document.createElement("div");
+    overlay.id = "aive-bl-overlay";
+    overlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.6);
+      z-index: 2147483647;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+
+    const box = document.createElement("div");
+    box.style.cssText = `
+      background: #111;
+      color: #fff;
+      padding: 16px 20px;
+      border-radius: 12px;
+      width: 420px;
+      max-height: 70vh;
+      overflow: auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,.7);
+      font-family: system-ui;
+    `;
+
+    box.innerHTML = `
+      <h3 style="margin-top:0">Blacklisted Domains</h3>
+      <ul style="padding-left:16px">
+        ${BLACKLIST.map(
+          d => `<li>${d} <button data-d="${d}">✕</button></li>`
+        ).join("")}
+      </ul>
+      <div style="margin-top:12px;text-align:right">
+        <button id="aive-bl-close">Close</button>
+      </div>
+    `;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    overlay.onclick = e => {
+      if (e.target === overlay) overlay.remove();
+      if (e.target.dataset?.d) {
+        BLACKLIST = BLACKLIST.filter(x => x !== e.target.dataset.d);
+        storageSet({ [BLACKLIST_KEY]: BLACKLIST });
+        overlay.remove();
+        openBlacklist();
+      }
+    };
+
+    box.querySelector("#aive-bl-close").onclick = () => overlay.remove();
   }
 
-  waitForBody();
+  // --------------------------------------------------
+  // SHORTCUTS
+  // --------------------------------------------------
+  document.addEventListener("keydown", e => {
+    if (e.altKey && e.shiftKey && e.code === "KeyB") openBlacklist();
+  });
+
+  // --------------------------------------------------
+  // INIT
+  // --------------------------------------------------
+  storageGet(BLACKLIST_KEY).then(list => {
+    BLACKLIST = Array.isArray(list) ? list : [];
+    if (BLACKLIST.includes(DOMAIN)) return;
+
+    const wait = () => {
+      if (!ALIVE) return;
+      if (document.body) createPanel();
+      else requestAnimationFrame(wait);
+    };
+    wait();
+  });
 
 })();
