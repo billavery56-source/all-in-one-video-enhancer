@@ -1,7 +1,7 @@
 console.log("AIVE content script loaded", location.href);
 
 // ======================================================
-// AIVE – CONTENT SCRIPT (POSITION RESTORE + OFFSCREEN FIX)
+// AIVE – CONTENT SCRIPT (DRAG + SNAP + POSITION RESTORE)
 // ======================================================
 
 (() => {
@@ -25,11 +25,10 @@ console.log("AIVE content script loaded", location.href);
       ? chrome.storage.local
       : null;
 
-  const get = key =>
-    new Promise(r => (STORE ? STORE.get(key, o => r(o[key])) : r(undefined)));
+  const get = (key) =>
+    new Promise((r) => (STORE ? STORE.get(key, (o) => r(o[key])) : r(undefined)));
 
-  const set = obj =>
-    new Promise(r => (STORE ? STORE.set(obj, r) : r()));
+  const set = (obj) => new Promise((r) => (STORE ? STORE.set(obj, r) : r()));
 
   const DOMAIN = location.hostname;
   const POS_KEY = `aive_pos_${DOMAIN}`;
@@ -77,7 +76,7 @@ console.log("AIVE content script loaded", location.href);
   let animMS = 1200;
   let inertia = 2.4;
   let delayMS = 600;
-  const ease = t => 1 - Math.pow(1 - t, inertia);
+  const ease = (t) => 1 - Math.pow(1 - t, inertia);
 
   // --------------------------------------------------
   // PANEL
@@ -95,30 +94,51 @@ console.log("AIVE content script loaded", location.href);
       </div>`;
   }
 
-  function clamp(n, min, max) {
-    return Math.max(min, Math.min(max, n));
+  const SNAP_PX = 28;  // how close to edge before snapping
+  const EDGE_PAD = 8;  // snapped padding from edge
+
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+
+  function viewportSize() {
+    // visualViewport helps on mobile / zoomed pages
+    const vv = window.visualViewport;
+    if (vv) return { w: vv.width, h: vv.height };
+    return { w: window.innerWidth || 1000, h: window.innerHeight || 800 };
+  }
+
+  function snapAndClamp(left, top) {
+    const rect = ROOT.getBoundingClientRect();
+    const panelW = rect.width || 360;
+    const panelH = rect.height || 80;
+
+    const { w: vw, h: vh } = viewportSize();
+
+    // clamp
+    left = clamp(left, EDGE_PAD, vw - panelW - EDGE_PAD);
+    top = clamp(top, EDGE_PAD, vh - panelH - EDGE_PAD);
+
+    // snap
+    if (left <= SNAP_PX) left = EDGE_PAD;
+    if (top <= SNAP_PX) top = EDGE_PAD;
+
+    const distRight = vw - (left + panelW);
+    const distBottom = vh - (top + panelH);
+
+    if (distRight <= SNAP_PX) left = vw - panelW - EDGE_PAD;
+    if (distBottom <= SNAP_PX) top = vh - panelH - EDGE_PAD;
+
+    return { left, top };
   }
 
   function setSafePosition(pos) {
-    // Default
-    let left = 20;
-    let top = 20;
-
+    let left = 20, top = 20;
     if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
       left = pos.left;
       top = pos.top;
     }
-
-    // Clamp to viewport so it can't get lost off-screen
-    const vw = window.innerWidth || 1000;
-    const vh = window.innerHeight || 800;
-
-    // Use a small margin; panel is ~360px wide but we don't need perfect math
-    left = clamp(left, 8, vw - 60);
-    top = clamp(top, 8, vh - 60);
-
-    ROOT.style.left = left + "px";
-    ROOT.style.top = top + "px";
+    const fixed = snapAndClamp(left, top);
+    ROOT.style.left = fixed.left + "px";
+    ROOT.style.top = fixed.top + "px";
   }
 
   function createPanel(savedPos) {
@@ -164,22 +184,12 @@ console.log("AIVE content script loaded", location.href);
 
     document.body.appendChild(ROOT);
 
-    // ✅ POSITION — clamp so it can't disappear off-screen
+    // position after attach (can measure size now)
     setSafePosition(savedPos);
 
     wireControls();
     blind(ROOT);
-    drag(ROOT);
-
-    // Handy: reset position hotkey (Ctrl+Shift+0)
-    window.addEventListener("keydown", async (e) => {
-      if (e.ctrlKey && e.shiftKey && (e.key === "0" || e.code === "Digit0")) {
-        e.preventDefault();
-        ROOT.style.left = "20px";
-        ROOT.style.top = "20px";
-        await set({ [POS_KEY]: { left: 20, top: 20 } });
-      }
-    }, { capture: true });
+    enableDragSnap(ROOT);
   }
 
   // --------------------------------------------------
@@ -198,10 +208,11 @@ console.log("AIVE content script loaded", location.href);
   }
 
   function wireControls() {
-    ROOT.querySelectorAll("input[type=range]").forEach(r => {
+    ROOT.querySelectorAll("input[type=range]").forEach((r) => {
       r.oninput = () => {
         const k = r.dataset.key;
         const v = Number(r.value);
+
         const lab = r.previousElementSibling;
         if (lab) {
           const span = lab.querySelector(".aive-val");
@@ -229,8 +240,9 @@ console.log("AIVE content script loaded", location.href);
     const helpBtn = ROOT.querySelector(".aive-help");
     if (helpBtn) {
       helpBtn.onclick = () => {
-        // simple placeholder help (you can swap this for a real help dialog)
-        alert("AIVE Help:\n\n• Hover the header to open controls\n• Drag header to move panel\n• Ctrl+Shift+0 resets position");
+        alert(
+          "AIVE Help:\n\n• Hover header to open\n• Drag header to move\n• Snaps to edges on release"
+        );
       };
     }
 
@@ -313,44 +325,76 @@ console.log("AIVE content script loaded", location.href);
   }
 
   // --------------------------------------------------
-  // DRAG + SAVE
+  // DRAG + SNAP (POINTER EVENTS)
   // --------------------------------------------------
 
-  function drag(root) {
-    const h = root.querySelector(".aive-header");
-    let ox, oy;
+  function enableDragSnap(root) {
+    const header = root.querySelector(".aive-header");
 
-    h.onmousedown = e => {
-      ox = e.clientX - root.offsetLeft;
-      oy = e.clientY - root.offsetTop;
+    let dragging = false;
+    let startX = 0, startY = 0;
+    let startLeft = 0, startTop = 0;
 
-      document.onmousemove = e => {
-        root.style.left = e.clientX - ox + "px";
-        root.style.top = e.clientY - oy + "px";
-      };
+    header.addEventListener("pointerdown", (e) => {
+      // ignore right click
+      if (e.button !== 0) return;
 
-      document.onmouseup = async () => {
-        document.onmousemove = null;
-        document.onmouseup = null;
+      dragging = true;
+      header.setPointerCapture(e.pointerId);
 
-        await set({
-          [POS_KEY]: {
-            left: root.offsetLeft,
-            top: root.offsetTop
-          }
-        });
-      };
-    };
+      startX = e.clientX;
+      startY = e.clientY;
+      startLeft = parseFloat(root.style.left) || root.offsetLeft || 0;
+      startTop = parseFloat(root.style.top) || root.offsetTop || 0;
+
+      e.preventDefault();
+    });
+
+    header.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+
+      const nextLeft = startLeft + dx;
+      const nextTop = startTop + dy;
+
+      // live clamp while moving (keeps it visible)
+      const fixed = snapAndClamp(nextLeft, nextTop);
+      root.style.left = fixed.left + "px";
+      root.style.top = fixed.top + "px";
+    });
+
+    header.addEventListener("pointerup", async (e) => {
+      if (!dragging) return;
+      dragging = false;
+
+      try { header.releasePointerCapture(e.pointerId); } catch {}
+
+      // snap is already applied live; just save
+      const left = parseFloat(root.style.left) || root.offsetLeft || 0;
+      const top = parseFloat(root.style.top) || root.offsetTop || 0;
+      const fixed = snapAndClamp(left, top);
+
+      root.style.left = fixed.left + "px";
+      root.style.top = fixed.top + "px";
+
+      await set({ [POS_KEY]: { left: fixed.left, top: fixed.top } });
+    });
+
+    header.addEventListener("pointercancel", () => {
+      dragging = false;
+    });
   }
 
   // --------------------------------------------------
   // INIT
   // --------------------------------------------------
 
-  get("aive_blacklist").then(list => {
+  get("aive_blacklist").then((list) => {
     if (Array.isArray(list) && list.includes(DOMAIN)) return;
 
-    get(POS_KEY).then(pos => {
+    get(POS_KEY).then((pos) => {
       const wait = () => {
         if (!ALIVE) return;
         if (document.body) createPanel(pos);
@@ -359,5 +403,4 @@ console.log("AIVE content script loaded", location.href);
       wait();
     });
   });
-
 })();
