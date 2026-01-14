@@ -1,5 +1,5 @@
 // ======================================================
-// AIVE – CONTENT SCRIPT (WITH EDGE DOCKING)
+// AIVE – CONTENT SCRIPT (POSITION RESTORE FINAL FIX)
 // ======================================================
 
 (() => {
@@ -23,24 +23,14 @@
       ? chrome.storage.local
       : null;
 
-  const storageGet = key =>
-    new Promise(r => {
-      if (!STORE) return r(undefined);
-      try { STORE.get(key, o => r(o[key])); }
-      catch { r(undefined); }
-    });
+  const get = key =>
+    new Promise(r => STORE ? STORE.get(key, o => r(o[key])) : r(undefined));
 
-  const storageSet = obj =>
-    new Promise(r => {
-      if (!STORE) return r();
-      try { STORE.set(obj, r); }
-      catch { r(); }
-    });
+  const set = obj =>
+    new Promise(r => STORE ? STORE.set(obj, r) : r());
 
   const DOMAIN = location.hostname;
-  const STATE_KEY = `aive_state_${DOMAIN}`;
-  const BLACKLIST_KEY = "aive_blacklist";
-  const DOCK_KEY = `aive_dock_${DOMAIN}`;
+  const POS_KEY = `aive_pos_${DOMAIN}`;
 
   // --------------------------------------------------
   // VIDEO
@@ -78,21 +68,14 @@
     `;
   }
 
-  function saveState() {
-    storageSet({ [STATE_KEY]: state });
-  }
-
   // --------------------------------------------------
   // BLIND CONFIG
   // --------------------------------------------------
 
-  const blindConfig = {
-    animMS: 1200,
-    inertia: 2.4,
-    delayMS: 600
-  };
-
-  const ease = t => 1 - Math.pow(1 - t, blindConfig.inertia);
+  let animMS = 1200;
+  let inertia = 2.4;
+  let delayMS = 600;
+  const ease = t => 1 - Math.pow(1 - t, inertia);
 
   // --------------------------------------------------
   // PANEL
@@ -104,12 +87,13 @@
     return `
       <div class="aive-row">
         <label>${label} <span class="aive-val">${val}</span></label>
-        <input type="range" data-key="${key}"
+        <input type="range"
+          data-key="${key}"
           min="${min}" max="${max}" step="${step}" value="${val}">
       </div>`;
   }
 
-  function createPanel(dock) {
+  function createPanel(savedPos) {
     ROOT = document.createElement("div");
     ROOT.id = "aive-root";
 
@@ -120,20 +104,20 @@
         <div class="aive-clip">
           <div class="aive-body">
 
-            ${slider("Brightness","brightness",0,2,0.01,state.brightness)}
-            ${slider("Contrast","contrast",0,2,0.01,state.contrast)}
-            ${slider("Saturation","saturation",0,2,0.01,state.saturation)}
-            ${slider("Sepia","sepia",0,1,0.01,state.sepia)}
-            ${slider("Zoom","zoom",1,2,0.01,state.zoom)}
+            ${slider("Brightness","brightness",0,2,0.01,1)}
+            ${slider("Contrast","contrast",0,2,0.01,1)}
+            ${slider("Saturation","saturation",0,2,0.01,1)}
+            ${slider("Sepia","sepia",0,1,0.01,0)}
+            ${slider("Zoom","zoom",1,2,0.01,1)}
 
             <div class="aive-row">
               <label>Flip Horizontal</label>
               <button class="aive-flip">Flip</button>
             </div>
 
-            ${slider("Animation Speed","speed",100,3000,50,blindConfig.animMS)}
-            ${slider("Blind Weight","inertia",1,4,0.1,blindConfig.inertia)}
-            ${slider("Collapse Delay","delay",0,2000,50,blindConfig.delayMS)}
+            ${slider("Animation Speed","speed",100,3000,50,animMS)}
+            ${slider("Blind Weight","inertia",1,4,0.1,inertia)}
+            ${slider("Collapse Delay","delay",0,2000,50,delayMS)}
 
             <div class="aive-buttons">
               <button class="aive-auto">Auto</button>
@@ -148,16 +132,31 @@
     `;
 
     document.body.appendChild(ROOT);
-    applyDock(dock);
+
+    // ✅ POSITION — JS OWNS IT
+    if (savedPos) {
+      ROOT.style.left = savedPos.left + "px";
+      ROOT.style.top = savedPos.top + "px";
+    } else {
+      ROOT.style.left = "20px";
+      ROOT.style.top = "20px";
+    }
+
     wireControls();
     blind(ROOT);
     drag(ROOT);
-    applyEffects();
   }
 
   // --------------------------------------------------
   // CONTROLS
   // --------------------------------------------------
+
+  function updateSlider(key, val) {
+    const r = ROOT.querySelector(`input[data-key="${key}"]`);
+    if (!r) return;
+    r.value = val;
+    r.previousElementSibling.querySelector(".aive-val").textContent = val;
+  }
 
   function wireControls() {
     ROOT.querySelectorAll("input[type=range]").forEach(r => {
@@ -169,19 +168,27 @@
         if (k in state) {
           state[k] = v;
           applyEffects();
-          saveState();
         }
-
-        if (k === "speed") blindConfig.animMS = v;
-        if (k === "inertia") blindConfig.inertia = v;
-        if (k === "delay") blindConfig.delayMS = v;
+        if (k === "speed") animMS = v;
+        if (k === "inertia") inertia = v;
+        if (k === "delay") delayMS = v;
       };
     });
 
     ROOT.querySelector(".aive-flip").onclick = () => {
       state.flip = !state.flip;
       applyEffects();
-      saveState();
+    };
+
+    ROOT.querySelector(".aive-auto").onclick = () => {
+      state.brightness = 1.1;
+      state.contrast = 1.1;
+      state.saturation = 1.15;
+
+      updateSlider("brightness", state.brightness);
+      updateSlider("contrast", state.contrast);
+      updateSlider("saturation", state.saturation);
+      applyEffects();
     };
 
     ROOT.querySelector(".aive-reset").onclick = () => {
@@ -193,32 +200,18 @@
         zoom: 1,
         flip: false
       });
-      updateSliders();
+      Object.entries(state).forEach(([k, v]) => updateSlider(k, v));
       applyEffects();
-      saveState();
-    };
-
-    ROOT.querySelector(".aive-auto").onclick = () => {
-      state.brightness = 1.1;
-      state.contrast = 1.1;
-      state.saturation = 1.15;
-      updateSliders();
-      applyEffects();
-      saveState();
     };
 
     ROOT.querySelector(".aive-disable").onclick = () => ROOT.remove();
-    ROOT.querySelector(".aive-blacklist").onclick = blacklistDomain;
-  }
 
-  function updateSliders() {
-    ROOT.querySelectorAll("input[data-key]").forEach(r => {
-      const k = r.dataset.key;
-      if (k in state) {
-        r.value = state[k];
-        r.previousElementSibling.querySelector(".aive-val").textContent = state[k];
-      }
-    });
+    ROOT.querySelector(".aive-blacklist").onclick = async () => {
+      const list = (await get("aive_blacklist")) || [];
+      if (!list.includes(DOMAIN)) list.push(DOMAIN);
+      await set({ aive_blacklist: list });
+      ROOT.remove();
+    };
   }
 
   // --------------------------------------------------
@@ -235,15 +228,14 @@
     function animate(to) {
       if (anim) return;
       anim = true;
-
       const from = clip.offsetHeight;
       const delta = to - from;
       const start = performance.now();
 
-      function step(now) {
-        const t = Math.min((now - start) / blindConfig.animMS, 1);
-        clip.style.height = from + delta * ease(t) + "px";
-        if (t < 1) requestAnimationFrame(step);
+      function step(t) {
+        const p = Math.min((t - start) / animMS, 1);
+        clip.style.height = from + delta * ease(p) + "px";
+        if (p < 1) requestAnimationFrame(step);
         else anim = false;
       }
       requestAnimationFrame(step);
@@ -262,30 +254,12 @@
       timer = setTimeout(() => {
         open = false;
         animate(0);
-      }, blindConfig.delayMS);
+      }, delayMS);
     };
   }
 
   // --------------------------------------------------
-  // DOCKING
-  // --------------------------------------------------
-
-  const SNAP_PX = 24;
-
-  function applyDock(dock) {
-    if (!dock) return;
-    ROOT.style.left = dock.left;
-    ROOT.style.top = dock.top;
-    ROOT.style.right = dock.right;
-    ROOT.style.bottom = dock.bottom;
-  }
-
-  function saveDock(dock) {
-    storageSet({ [DOCK_KEY]: dock });
-  }
-
-  // --------------------------------------------------
-  // DRAG + SNAP
+  // DRAG + SAVE
   // --------------------------------------------------
 
   function drag(root) {
@@ -293,7 +267,6 @@
     let ox, oy;
 
     h.onmousedown = e => {
-      root.style.right = root.style.bottom = "";
       ox = e.clientX - root.offsetLeft;
       oy = e.clientY - root.offsetTop;
 
@@ -302,64 +275,33 @@
         root.style.top = e.clientY - oy + "px";
       };
 
-      document.onmouseup = () => {
+      document.onmouseup = async () => {
         document.onmousemove = null;
-        snapToEdge();
+        await set({
+          [POS_KEY]: {
+            left: root.offsetLeft,
+            top: root.offsetTop
+          }
+        });
       };
     };
-
-    function snapToEdge() {
-      const r = root.getBoundingClientRect();
-      const w = innerWidth;
-      const h = innerHeight;
-      let dock = null;
-
-      if (r.left < SNAP_PX) dock = { left: "10px", top: r.top + "px" };
-      else if (w - r.right < SNAP_PX) dock = { right: "10px", top: r.top + "px" };
-      else if (r.top < SNAP_PX) dock = { top: "10px", left: r.left + "px" };
-      else if (h - r.bottom < SNAP_PX) dock = { bottom: "10px", left: r.left + "px" };
-
-      if (dock) {
-        applyDock(dock);
-        saveDock(dock);
-      } else {
-        saveDock(null);
-      }
-    }
-  }
-
-  // --------------------------------------------------
-  // BLACKLIST
-  // --------------------------------------------------
-
-  function blacklistDomain() {
-    storageGet(BLACKLIST_KEY).then(list => {
-      const arr = Array.isArray(list) ? list : [];
-      if (!arr.includes(DOMAIN)) {
-        arr.push(DOMAIN);
-        storageSet({ [BLACKLIST_KEY]: arr }).then(() => ROOT.remove());
-      }
-    });
   }
 
   // --------------------------------------------------
   // INIT
   // --------------------------------------------------
 
-  Promise.all([
-    storageGet(BLACKLIST_KEY),
-    storageGet(STATE_KEY),
-    storageGet(DOCK_KEY)
-  ]).then(([blacklist, saved, dock]) => {
-    if (Array.isArray(blacklist) && blacklist.includes(DOMAIN)) return;
-    if (saved && typeof saved === "object") Object.assign(state, saved);
+  get("aive_blacklist").then(list => {
+    if (Array.isArray(list) && list.includes(DOMAIN)) return;
 
-    const wait = () => {
-      if (!ALIVE) return;
-      if (document.body) createPanel(dock);
-      else requestAnimationFrame(wait);
-    };
-    wait();
+    get(POS_KEY).then(pos => {
+      const wait = () => {
+        if (!ALIVE) return;
+        if (document.body) createPanel(pos);
+        else requestAnimationFrame(wait);
+      };
+      wait();
+    });
   });
 
 })();
