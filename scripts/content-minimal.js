@@ -1,7 +1,7 @@
 console.log("AIVE content script loaded", location.href);
 
 // ======================================================
-// AIVE – CONTENT SCRIPT (DRAG + SNAP + BLACKLIST DIALOG HOTKEY)
+// AIVE – CONTENT SCRIPT (DRAG + SNAP + HELP DIALOG + BLACKLIST HOTKEY)
 // ======================================================
 
 (() => {
@@ -34,139 +34,189 @@ console.log("AIVE content script loaded", location.href);
   const POS_KEY = `aive_pos_${DOMAIN}`;
 
   // --------------------------------------------------
-  // BLACKLIST DIALOG (WORKS EVEN IF SITE IS BLACKLISTED)
+  // DIALOGS (HELP + BLACKLIST) — WORK EVERYWHERE
   // --------------------------------------------------
 
-  const DIALOG_ID = "aive-blacklist-dialog";
+  const BL_DIALOG_ID = "aive-blacklist-dialog";
+  const HELP_DIALOG_ID = "aive-help-dialog";
 
-  function ensureDialogStyles() {
-    if (document.getElementById("aive-blacklist-style")) return;
-    const st = document.createElement("style");
-    st.id = "aive-blacklist-style";
-    st.textContent = `
-      #${DIALOG_ID} {
-        position: fixed;
-        inset: 0;
-        z-index: 2147483647;
-        display: grid;
-        place-items: center;
-        pointer-events: auto;
-      }
-      #${DIALOG_ID} .aive-bl-backdrop {
-        position: absolute;
-        inset: 0;
-        background: rgba(0,0,0,0.55);
-      }
-      #${DIALOG_ID} .aive-bl-card {
-        position: relative;
-        width: min(720px, 92vw);
-        max-height: min(82vh, 900px);
-        overflow: hidden;
+  function closeDialogById(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  }
 
-        border-radius: 14px;
-        border: 1px solid rgba(255,255,255,0.12);
-        background: #0f1115;
-        color: #e9eef7;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        box-shadow: 0 18px 50px rgba(0,0,0,0.6);
-      }
-      #${DIALOG_ID} .aive-bl-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
+  function makeOverlay(id) {
+    closeDialogById(id);
 
-        padding: 12px 14px;
-        border-bottom: 1px solid rgba(255,255,255,0.10);
-        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
-        font-weight: 900;
-        letter-spacing: 0.2px;
-      }
-      #${DIALOG_ID} .aive-bl-x {
-        border: none;
-        background: transparent;
-        color: #a7b0c0;
-        font-weight: 900;
-        font-size: 18px;
-        cursor: pointer;
-        padding: 2px 6px;
-      }
-      #${DIALOG_ID} .aive-bl-x:hover { color: #e9eef7; }
+    const ovl = document.createElement("div");
+    ovl.id = id;
+    ovl.tabIndex = -1;
 
-      #${DIALOG_ID} .aive-bl-body {
-        padding: 12px 14px;
-        display: grid;
-        gap: 10px;
-      }
-
-      #${DIALOG_ID} .aive-bl-hint {
-        color: #a7b0c0;
-        font-size: 12px;
-        line-height: 1.35;
-      }
-
-      #${DIALOG_ID} textarea {
-        width: 100%;
-        min-height: 240px;
-        max-height: 46vh;
-        resize: vertical;
-
-        background: #10131a;
-        border: 1px solid rgba(255,255,255,0.12);
-        border-radius: 12px;
-        padding: 10px;
-        color: #e9eef7;
-        outline: none;
-        font-size: 13px;
-        line-height: 1.35;
-      }
-      #${DIALOG_ID} textarea:focus {
-        border-color: rgba(77,163,255,0.55);
-      }
-
-      #${DIALOG_ID} .aive-bl-buttons {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr 1fr;
-        gap: 8px;
-        margin-top: 4px;
-      }
-
-      #${DIALOG_ID} .aive-bl-btn {
-        border: 1px solid rgba(255,255,255,0.12);
-        background: #2a3140;
-        color: #e9eef7;
-        border-radius: 12px;
-        padding: 10px 10px;
-        font-weight: 850;
-        cursor: pointer;
-      }
-      #${DIALOG_ID} .aive-bl-btn:hover {
-        border-color: rgba(77,163,255,0.35);
-        filter: brightness(1.05);
-      }
-      #${DIALOG_ID} .aive-bl-btn.secondary { background: transparent; }
-      #${DIALOG_ID} .aive-bl-btn.danger { background: #7a2b2b; }
-
-      #${DIALOG_ID} .aive-bl-footer {
-        padding: 10px 14px 14px 14px;
-        border-top: 1px solid rgba(255,255,255,0.10);
-        color: #a7b0c0;
-        font-size: 12px;
-        display: flex;
-        justify-content: space-between;
-        gap: 10px;
-        align-items: center;
-      }
-      #${DIALOG_ID} .aive-bl-kbd {
-        border: 1px solid rgba(255,255,255,0.12);
-        background: rgba(255,255,255,0.04);
-        border-radius: 999px;
-        padding: 2px 10px;
-        color: #e9eef7;
-        font-weight: 850;
-      }
+    // Inline "critical" styles so the dialog cannot be hidden by page CSS
+    ovl.style.cssText = `
+      position: fixed;
+      inset: 0;
+      z-index: 2147483647;
+      display: grid;
+      place-items: center;
+      pointer-events: auto;
     `;
-    document.documentElement.appendChild(st);
+
+    const backdrop = document.createElement("div");
+    backdrop.style.cssText = `
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.58);
+    `;
+
+    const card = document.createElement("div");
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    card.style.cssText = `
+      position: relative;
+      width: min(760px, 92vw);
+      max-height: min(84vh, 900px);
+      overflow: hidden;
+
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: #0f1115;
+      color: #e9eef7;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      box-shadow: 0 18px 54px rgba(0,0,0,0.65);
+    `;
+
+    const top = document.createElement("div");
+    top.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.10);
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0));
+      font-weight: 950;
+      letter-spacing: 0.2px;
+    `;
+
+    const title = document.createElement("div");
+    const x = document.createElement("button");
+    x.type = "button";
+    x.textContent = "✕";
+    x.title = "Close";
+    x.style.cssText = `
+      border: none;
+      background: transparent;
+      color: #a7b0c0;
+      font-weight: 900;
+      font-size: 18px;
+      cursor: pointer;
+      padding: 2px 8px;
+      border-radius: 10px;
+    `;
+    x.addEventListener("mouseenter", () => (x.style.color = "#e9eef7"));
+    x.addEventListener("mouseleave", () => (x.style.color = "#a7b0c0"));
+
+    top.appendChild(title);
+    top.appendChild(x);
+
+    const body = document.createElement("div");
+    body.style.cssText = `
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+      overflow: auto;
+      max-height: calc(min(84vh, 900px) - 56px);
+    `;
+
+    // Close wiring
+    const close = () => ovl.remove();
+
+    backdrop.addEventListener("click", close);
+    x.addEventListener("click", close);
+
+    ovl.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          close();
+        }
+      },
+      true
+    );
+
+    // Prevent clicks inside card from closing
+    card.addEventListener("click", (e) => e.stopPropagation());
+
+    card.appendChild(top);
+    card.appendChild(body);
+
+    ovl.appendChild(backdrop);
+    ovl.appendChild(card);
+
+    return { ovl, titleEl: title, bodyEl: body };
+  }
+
+  function smallMuted(text) {
+    const p = document.createElement("div");
+    p.textContent = text;
+    p.style.cssText = `
+      color: #a7b0c0;
+      font-size: 12px;
+      line-height: 1.4;
+    `;
+    return p;
+  }
+
+  function chip(text) {
+    const c = document.createElement("span");
+    c.textContent = text;
+    c.style.cssText = `
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.04);
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 12px;
+      font-weight: 850;
+      color: #e9eef7;
+      white-space: nowrap;
+    `;
+    return c;
+  }
+
+  function section(titleText) {
+    const s = document.createElement("div");
+    s.style.cssText = `
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.03);
+      border-radius: 14px;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    `;
+
+    const h = document.createElement("div");
+    h.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 950;
+      font-size: 13px;
+      letter-spacing: 0.15px;
+    `;
+
+    const t = document.createElement("div");
+    t.textContent = titleText;
+
+    h.appendChild(t);
+    s.appendChild(h);
+
+    return { s, h };
   }
 
   function normalizeDomains(text) {
@@ -179,14 +229,11 @@ console.log("AIVE content script loaded", location.href);
     const seen = new Set();
 
     for (const line of lines) {
-      // Strip protocol/path if user pasted a URL
       let d = line;
       try {
         if (/^https?:\/\//i.test(d)) d = new URL(d).hostname;
       } catch {}
-
       d = d.toLowerCase().replace(/^\.+/, "").replace(/\.+$/, "");
-
       if (!d) continue;
       if (!seen.has(d)) {
         seen.add(d);
@@ -199,103 +246,169 @@ console.log("AIVE content script loaded", location.href);
   async function openBlacklistDialog() {
     if (!document.body) return;
 
-    // If already open, just focus it
-    const existing = document.getElementById(DIALOG_ID);
-    if (existing) return;
-
-    ensureDialogStyles();
+    const { ovl, titleEl, bodyEl } = makeOverlay(BL_DIALOG_ID);
+    titleEl.textContent = "Blacklist Manager";
 
     const list = (await get("aive_blacklist")) || [];
     const text = Array.isArray(list) ? list.join("\n") : "";
 
-    const wrap = document.createElement("div");
-    wrap.id = DIALOG_ID;
+    const sec = section("Domains");
+    sec.h.appendChild(chip("Alt + Shift + B"));
 
-    wrap.innerHTML = `
-      <div class="aive-bl-backdrop"></div>
-      <div class="aive-bl-card" role="dialog" aria-modal="true">
-        <div class="aive-bl-header">
-          <div>Blacklist Manager</div>
-          <button class="aive-bl-x" type="button" title="Close">✕</button>
-        </div>
+    const hint = smallMuted("One domain per line. You can paste full URLs too — AIVE will extract the hostname.");
+    const ta = document.createElement("textarea");
+    ta.spellcheck = false;
+    ta.value = text;
+    ta.placeholder = "youtube.com\nexample.com";
+    ta.style.cssText = `
+      width: 100%;
+      min-height: 240px;
+      max-height: 44vh;
+      resize: vertical;
+      background: #10131a;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 12px;
+      padding: 10px;
+      color: #e9eef7;
+      outline: none;
+      font-size: 13px;
+      line-height: 1.35;
+    `;
+    ta.addEventListener("focus", () => (ta.style.borderColor = "rgba(77,163,255,0.55)"));
+    ta.addEventListener("blur", () => (ta.style.borderColor = "rgba(255,255,255,0.14)"));
 
-        <div class="aive-bl-body">
-          <div class="aive-bl-hint">
-            One domain per line. Example: <b>youtube.com</b><br>
-            This dialog opens anywhere (even on blacklisted sites).
-          </div>
-
-          <textarea spellcheck="false" class="aive-bl-textarea" placeholder="example.com&#10;another-site.com">${text}</textarea>
-
-          <div class="aive-bl-buttons">
-            <button class="aive-bl-btn" type="button" data-act="save">Save</button>
-            <button class="aive-bl-btn secondary" type="button" data-act="cancel">Cancel</button>
-            <button class="aive-bl-btn" type="button" data-act="addCurrent">Add This Site</button>
-            <button class="aive-bl-btn danger" type="button" data-act="removeCurrent">Remove This Site</button>
-          </div>
-        </div>
-
-        <div class="aive-bl-footer">
-          <div>Current site: <b>${DOMAIN}</b></div>
-          <div class="aive-bl-kbd">Alt + Shift + B</div>
-        </div>
-      </div>
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = `
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 8px;
+      margin-top: 2px;
     `;
 
-    const close = () => wrap.remove();
+    function mkBtn(label, kind = "normal") {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.style.cssText = `
+        border: 1px solid rgba(255,255,255,0.14);
+        background: ${kind === "secondary" ? "transparent" : kind === "danger" ? "#7a2b2b" : "#2a3140"};
+        color: #e9eef7;
+        border-radius: 12px;
+        padding: 10px 10px;
+        font-weight: 850;
+        cursor: pointer;
+      `;
+      return b;
+    }
 
-    // backdrop click closes
-    wrap.querySelector(".aive-bl-backdrop").addEventListener("click", close);
+    const saveBtn = mkBtn("Save");
+    const cancelBtn = mkBtn("Cancel", "secondary");
+    const addBtn = mkBtn("Add This Site");
+    const removeBtn = mkBtn("Remove This Site", "danger");
 
-    // X closes
-    wrap.querySelector(".aive-bl-x").addEventListener("click", close);
+    cancelBtn.onclick = () => ovl.remove();
 
-    // Esc closes
-    wrap.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        close();
-      }
-    });
+    addBtn.onclick = () => {
+      const domains = normalizeDomains(ta.value);
+      const d = DOMAIN.toLowerCase();
+      if (!domains.includes(d)) domains.push(d);
+      ta.value = domains.join("\n");
+      ta.focus();
+    };
 
-    const ta = wrap.querySelector(".aive-bl-textarea");
+    removeBtn.onclick = () => {
+      const d = DOMAIN.toLowerCase();
+      const domains = normalizeDomains(ta.value).filter((x) => x !== d);
+      ta.value = domains.join("\n");
+      ta.focus();
+    };
 
-    wrap.querySelectorAll("[data-act]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const act = btn.getAttribute("data-act");
+    saveBtn.onclick = async () => {
+      const domains = normalizeDomains(ta.value);
+      await set({ aive_blacklist: domains });
+      ovl.remove();
+    };
 
-        if (act === "cancel") return close();
+    btnRow.append(saveBtn, cancelBtn, addBtn, removeBtn);
 
-        if (act === "addCurrent") {
-          const domains = normalizeDomains(ta.value);
-          if (!domains.includes(DOMAIN.toLowerCase())) domains.push(DOMAIN.toLowerCase());
-          ta.value = domains.join("\n");
-          ta.focus();
-          return;
-        }
+    const current = smallMuted(`Current site: ${DOMAIN}`);
 
-        if (act === "removeCurrent") {
-          const domains = normalizeDomains(ta.value).filter((d) => d !== DOMAIN.toLowerCase());
-          ta.value = domains.join("\n");
-          ta.focus();
-          return;
-        }
+    sec.s.append(hint, ta, btnRow, current);
+    bodyEl.appendChild(sec.s);
 
-        if (act === "save") {
-          const domains = normalizeDomains(ta.value);
-          await set({ aive_blacklist: domains });
-          close();
-          return;
-        }
-      });
-    });
-
-    document.body.appendChild(wrap);
+    document.body.appendChild(ovl);
+    ovl.focus();
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
   }
 
-  // ✅ Always listen for the command message, even if site is blacklisted
+  function openHelpDialog() {
+    if (!document.body) return;
+
+    const { ovl, titleEl, bodyEl } = makeOverlay(HELP_DIALOG_ID);
+    titleEl.textContent = "AIVE Help";
+
+    const sec1 = section("Quick use");
+    sec1.h.appendChild(chip("No alerts"));
+    sec1.s.appendChild(
+      smallMuted(
+        "• Hover the header to open the controls.\n" +
+        "• Drag the header to move the panel.\n" +
+        "• Panel snaps to edges when you release near an edge.\n" +
+        "• Effects apply to the page’s first <video> element."
+      )
+    );
+
+    const sec2 = section("Hotkey");
+    sec2.h.appendChild(chip("Alt + Shift + B"));
+    sec2.s.appendChild(
+      smallMuted(
+        "Opens the Blacklist Manager on any normal website (even if the site is blacklisted).\n" +
+        "If it doesn’t fire, check chrome://extensions/shortcuts."
+      )
+    );
+
+    const sec3 = section("What the sliders do");
+    sec3.s.appendChild(
+      smallMuted(
+        "Brightness – light/dark\n" +
+        "Contrast – separation/pop\n" +
+        "Saturation – color intensity\n" +
+        "Sepia – warm tone\n" +
+        "Zoom – scale the video\n\n" +
+        "Animation Speed – blind open/close speed\n" +
+        "Blind Weight – easing strength\n" +
+        "Collapse Delay – how long before it collapses after mouse leaves"
+      )
+    );
+
+    const sec4 = section("Blacklist");
+    const openBL = document.createElement("button");
+    openBL.type = "button";
+    openBL.textContent = "Open Blacklist Manager";
+    openBL.style.cssText = `
+      border: 1px solid rgba(255,255,255,0.14);
+      background: #2a3140;
+      color: #e9eef7;
+      border-radius: 12px;
+      padding: 10px 10px;
+      font-weight: 850;
+      cursor: pointer;
+      width: min(280px, 100%);
+    `;
+    openBL.onclick = () => {
+      ovl.remove();
+      openBlacklistDialog();
+    };
+    sec4.s.appendChild(smallMuted("Blacklisted sites won’t show the panel/effects, but the blacklist dialog is always available."), openBL);
+
+    bodyEl.append(sec1.s, sec2.s, sec3.s, sec4.s);
+
+    document.body.appendChild(ovl);
+    ovl.focus();
+  }
+
+  // Always listen for SW message (even if blacklisted)
   if (chrome?.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg && msg.type === "AIVE_OPEN_BLACKLIST_DIALOG") {
@@ -304,19 +417,14 @@ console.log("AIVE content script loaded", location.href);
     });
   }
 
-  // Fallback: page-level hotkey (not as reliable as Chrome command, but helps)
+  // Fallback hotkey (less reliable than Chrome command)
   window.addEventListener(
     "keydown",
     (e) => {
       if (e.altKey && e.shiftKey && (e.key === "B" || e.key === "b")) {
-        // Don’t trigger while typing in inputs/textareas/contenteditable
         const t = e.target;
         const tag = t && t.tagName ? t.tagName.toLowerCase() : "";
-        const typing =
-          tag === "input" ||
-          tag === "textarea" ||
-          (t && t.isContentEditable);
-
+        const typing = tag === "input" || tag === "textarea" || (t && t.isContentEditable);
         if (!typing) {
           e.preventDefault();
           openBlacklistDialog();
@@ -326,17 +434,13 @@ console.log("AIVE content script loaded", location.href);
     true
   );
 
-  // --------------------------------------------------
-  // IF THIS SITE IS BLACKLISTED, STOP HERE (BUT HOTKEY STILL WORKS)
-  // --------------------------------------------------
-
   async function isBlacklisted() {
     const list = (await get("aive_blacklist")) || [];
     return Array.isArray(list) && list.includes(DOMAIN);
   }
 
   // --------------------------------------------------
-  // THE REST: PANEL + EFFECTS (ONLY WHEN NOT BLACKLISTED)
+  // PANEL + EFFECTS (ONLY WHEN NOT BLACKLISTED)
   // --------------------------------------------------
 
   const getVideo = () => document.querySelector("video");
@@ -519,8 +623,11 @@ console.log("AIVE content script loaded", location.href);
 
     const helpBtn = ROOT.querySelector(".aive-help");
     if (helpBtn) {
-      helpBtn.onclick = () => {
-        openBlacklistDialog(); // or swap to a real help dialog later
+      // Prevent header drag from hijacking click
+      helpBtn.addEventListener("pointerdown", (e) => e.stopPropagation(), true);
+      helpBtn.onclick = (e) => {
+        e.stopPropagation();
+        openHelpDialog();
       };
     }
 
@@ -558,7 +665,9 @@ console.log("AIVE content script loaded", location.href);
     const clip = root.querySelector(".aive-clip");
     const body = root.querySelector(".aive-body");
 
-    let open = false, anim = false, timer;
+    let open = false,
+      anim = false,
+      timer;
 
     function animate(to) {
       if (anim) return;
@@ -597,11 +706,17 @@ console.log("AIVE content script loaded", location.href);
     const header = root.querySelector(".aive-header");
 
     let dragging = false;
-    let startX = 0, startY = 0;
-    let startLeft = 0, startTop = 0;
+    let startX = 0,
+      startY = 0;
+    let startLeft = 0,
+      startTop = 0;
 
     header.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
+
+      // ✅ If user clicked the help button (or any button), do NOT start drag
+      if (e.target && e.target.closest && e.target.closest("button")) return;
+
       dragging = true;
       header.setPointerCapture(e.pointerId);
 
@@ -631,7 +746,9 @@ console.log("AIVE content script loaded", location.href);
       if (!dragging) return;
       dragging = false;
 
-      try { header.releasePointerCapture(e.pointerId); } catch {}
+      try {
+        header.releasePointerCapture(e.pointerId);
+      } catch {}
 
       const left = parseFloat(root.style.left) || root.offsetLeft || 0;
       const top = parseFloat(root.style.top) || root.offsetTop || 0;
@@ -648,8 +765,12 @@ console.log("AIVE content script loaded", location.href);
     });
   }
 
+  // --------------------------------------------------
   // INIT
+  // --------------------------------------------------
+
   (async () => {
+    // dialogs always work, but skip panel/effects when blacklisted
     if (await isBlacklisted()) return;
 
     const pos = await get(POS_KEY);
