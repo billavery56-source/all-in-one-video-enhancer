@@ -4,8 +4,12 @@
   "version": "0.1.0",
   "description": "AIVE floating video controls",
 
-  "permissions": ["storage"],
+  "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
+
+  "background": {
+    "service_worker": "sw.js"
+  },
 
   "icons": {
     "16": "icons/brand-16.png",
@@ -21,6 +25,15 @@
       "32": "icons/brand-32.png",
       "48": "icons/brand-48.png",
       "128": "icons/brand-128.png"
+    }
+  },
+
+  "commands": {
+    "aive_open_blacklist": {
+      "suggested_key": {
+        "default": "Alt+Shift+B"
+      },
+      "description": "Open AIVE Blacklist Manager"
     }
   },
 

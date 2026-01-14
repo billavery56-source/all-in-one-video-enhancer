@@ -1,7 +1,7 @@
 console.log("AIVE content script loaded", location.href);
 
 // ======================================================
-// AIVE – CONTENT SCRIPT (DRAG + SNAP + POSITION RESTORE)
+// AIVE – CONTENT SCRIPT (DRAG + SNAP + BLACKLIST DIALOG HOTKEY)
 // ======================================================
 
 (() => {
@@ -34,14 +34,312 @@ console.log("AIVE content script loaded", location.href);
   const POS_KEY = `aive_pos_${DOMAIN}`;
 
   // --------------------------------------------------
-  // VIDEO
+  // BLACKLIST DIALOG (WORKS EVEN IF SITE IS BLACKLISTED)
+  // --------------------------------------------------
+
+  const DIALOG_ID = "aive-blacklist-dialog";
+
+  function ensureDialogStyles() {
+    if (document.getElementById("aive-blacklist-style")) return;
+    const st = document.createElement("style");
+    st.id = "aive-blacklist-style";
+    st.textContent = `
+      #${DIALOG_ID} {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        pointer-events: auto;
+      }
+      #${DIALOG_ID} .aive-bl-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0,0,0,0.55);
+      }
+      #${DIALOG_ID} .aive-bl-card {
+        position: relative;
+        width: min(720px, 92vw);
+        max-height: min(82vh, 900px);
+        overflow: hidden;
+
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,0.12);
+        background: #0f1115;
+        color: #e9eef7;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+      }
+      #${DIALOG_ID} .aive-bl-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(255,255,255,0.10);
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0));
+        font-weight: 900;
+        letter-spacing: 0.2px;
+      }
+      #${DIALOG_ID} .aive-bl-x {
+        border: none;
+        background: transparent;
+        color: #a7b0c0;
+        font-weight: 900;
+        font-size: 18px;
+        cursor: pointer;
+        padding: 2px 6px;
+      }
+      #${DIALOG_ID} .aive-bl-x:hover { color: #e9eef7; }
+
+      #${DIALOG_ID} .aive-bl-body {
+        padding: 12px 14px;
+        display: grid;
+        gap: 10px;
+      }
+
+      #${DIALOG_ID} .aive-bl-hint {
+        color: #a7b0c0;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      #${DIALOG_ID} textarea {
+        width: 100%;
+        min-height: 240px;
+        max-height: 46vh;
+        resize: vertical;
+
+        background: #10131a;
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 12px;
+        padding: 10px;
+        color: #e9eef7;
+        outline: none;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+      #${DIALOG_ID} textarea:focus {
+        border-color: rgba(77,163,255,0.55);
+      }
+
+      #${DIALOG_ID} .aive-bl-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        gap: 8px;
+        margin-top: 4px;
+      }
+
+      #${DIALOG_ID} .aive-bl-btn {
+        border: 1px solid rgba(255,255,255,0.12);
+        background: #2a3140;
+        color: #e9eef7;
+        border-radius: 12px;
+        padding: 10px 10px;
+        font-weight: 850;
+        cursor: pointer;
+      }
+      #${DIALOG_ID} .aive-bl-btn:hover {
+        border-color: rgba(77,163,255,0.35);
+        filter: brightness(1.05);
+      }
+      #${DIALOG_ID} .aive-bl-btn.secondary { background: transparent; }
+      #${DIALOG_ID} .aive-bl-btn.danger { background: #7a2b2b; }
+
+      #${DIALOG_ID} .aive-bl-footer {
+        padding: 10px 14px 14px 14px;
+        border-top: 1px solid rgba(255,255,255,0.10);
+        color: #a7b0c0;
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: center;
+      }
+      #${DIALOG_ID} .aive-bl-kbd {
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(255,255,255,0.04);
+        border-radius: 999px;
+        padding: 2px 10px;
+        color: #e9eef7;
+        font-weight: 850;
+      }
+    `;
+    document.documentElement.appendChild(st);
+  }
+
+  function normalizeDomains(text) {
+    const lines = (text || "")
+      .split(/\r?\n/g)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const cleaned = [];
+    const seen = new Set();
+
+    for (const line of lines) {
+      // Strip protocol/path if user pasted a URL
+      let d = line;
+      try {
+        if (/^https?:\/\//i.test(d)) d = new URL(d).hostname;
+      } catch {}
+
+      d = d.toLowerCase().replace(/^\.+/, "").replace(/\.+$/, "");
+
+      if (!d) continue;
+      if (!seen.has(d)) {
+        seen.add(d);
+        cleaned.push(d);
+      }
+    }
+    return cleaned;
+  }
+
+  async function openBlacklistDialog() {
+    if (!document.body) return;
+
+    // If already open, just focus it
+    const existing = document.getElementById(DIALOG_ID);
+    if (existing) return;
+
+    ensureDialogStyles();
+
+    const list = (await get("aive_blacklist")) || [];
+    const text = Array.isArray(list) ? list.join("\n") : "";
+
+    const wrap = document.createElement("div");
+    wrap.id = DIALOG_ID;
+
+    wrap.innerHTML = `
+      <div class="aive-bl-backdrop"></div>
+      <div class="aive-bl-card" role="dialog" aria-modal="true">
+        <div class="aive-bl-header">
+          <div>Blacklist Manager</div>
+          <button class="aive-bl-x" type="button" title="Close">✕</button>
+        </div>
+
+        <div class="aive-bl-body">
+          <div class="aive-bl-hint">
+            One domain per line. Example: <b>youtube.com</b><br>
+            This dialog opens anywhere (even on blacklisted sites).
+          </div>
+
+          <textarea spellcheck="false" class="aive-bl-textarea" placeholder="example.com&#10;another-site.com">${text}</textarea>
+
+          <div class="aive-bl-buttons">
+            <button class="aive-bl-btn" type="button" data-act="save">Save</button>
+            <button class="aive-bl-btn secondary" type="button" data-act="cancel">Cancel</button>
+            <button class="aive-bl-btn" type="button" data-act="addCurrent">Add This Site</button>
+            <button class="aive-bl-btn danger" type="button" data-act="removeCurrent">Remove This Site</button>
+          </div>
+        </div>
+
+        <div class="aive-bl-footer">
+          <div>Current site: <b>${DOMAIN}</b></div>
+          <div class="aive-bl-kbd">Alt + Shift + B</div>
+        </div>
+      </div>
+    `;
+
+    const close = () => wrap.remove();
+
+    // backdrop click closes
+    wrap.querySelector(".aive-bl-backdrop").addEventListener("click", close);
+
+    // X closes
+    wrap.querySelector(".aive-bl-x").addEventListener("click", close);
+
+    // Esc closes
+    wrap.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+      }
+    });
+
+    const ta = wrap.querySelector(".aive-bl-textarea");
+
+    wrap.querySelectorAll("[data-act]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const act = btn.getAttribute("data-act");
+
+        if (act === "cancel") return close();
+
+        if (act === "addCurrent") {
+          const domains = normalizeDomains(ta.value);
+          if (!domains.includes(DOMAIN.toLowerCase())) domains.push(DOMAIN.toLowerCase());
+          ta.value = domains.join("\n");
+          ta.focus();
+          return;
+        }
+
+        if (act === "removeCurrent") {
+          const domains = normalizeDomains(ta.value).filter((d) => d !== DOMAIN.toLowerCase());
+          ta.value = domains.join("\n");
+          ta.focus();
+          return;
+        }
+
+        if (act === "save") {
+          const domains = normalizeDomains(ta.value);
+          await set({ aive_blacklist: domains });
+          close();
+          return;
+        }
+      });
+    });
+
+    document.body.appendChild(wrap);
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+
+  // ✅ Always listen for the command message, even if site is blacklisted
+  if (chrome?.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg && msg.type === "AIVE_OPEN_BLACKLIST_DIALOG") {
+        openBlacklistDialog();
+      }
+    });
+  }
+
+  // Fallback: page-level hotkey (not as reliable as Chrome command, but helps)
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.altKey && e.shiftKey && (e.key === "B" || e.key === "b")) {
+        // Don’t trigger while typing in inputs/textareas/contenteditable
+        const t = e.target;
+        const tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+        const typing =
+          tag === "input" ||
+          tag === "textarea" ||
+          (t && t.isContentEditable);
+
+        if (!typing) {
+          e.preventDefault();
+          openBlacklistDialog();
+        }
+      }
+    },
+    true
+  );
+
+  // --------------------------------------------------
+  // IF THIS SITE IS BLACKLISTED, STOP HERE (BUT HOTKEY STILL WORKS)
+  // --------------------------------------------------
+
+  async function isBlacklisted() {
+    const list = (await get("aive_blacklist")) || [];
+    return Array.isArray(list) && list.includes(DOMAIN);
+  }
+
+  // --------------------------------------------------
+  // THE REST: PANEL + EFFECTS (ONLY WHEN NOT BLACKLISTED)
   // --------------------------------------------------
 
   const getVideo = () => document.querySelector("video");
-
-  // --------------------------------------------------
-  // EFFECT STATE
-  // --------------------------------------------------
 
   const state = {
     brightness: 1,
@@ -69,18 +367,10 @@ console.log("AIVE content script loaded", location.href);
     `;
   }
 
-  // --------------------------------------------------
-  // BLIND CONFIG
-  // --------------------------------------------------
-
   let animMS = 1200;
   let inertia = 2.4;
   let delayMS = 600;
   const ease = (t) => 1 - Math.pow(1 - t, inertia);
-
-  // --------------------------------------------------
-  // PANEL
-  // --------------------------------------------------
 
   let ROOT;
 
@@ -94,13 +384,11 @@ console.log("AIVE content script loaded", location.href);
       </div>`;
   }
 
-  const SNAP_PX = 28;  // how close to edge before snapping
-  const EDGE_PAD = 8;  // snapped padding from edge
-
+  const SNAP_PX = 28;
+  const EDGE_PAD = 8;
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
   function viewportSize() {
-    // visualViewport helps on mobile / zoomed pages
     const vv = window.visualViewport;
     if (vv) return { w: vv.width, h: vv.height };
     return { w: window.innerWidth || 1000, h: window.innerHeight || 800 };
@@ -113,11 +401,9 @@ console.log("AIVE content script loaded", location.href);
 
     const { w: vw, h: vh } = viewportSize();
 
-    // clamp
     left = clamp(left, EDGE_PAD, vw - panelW - EDGE_PAD);
     top = clamp(top, EDGE_PAD, vh - panelH - EDGE_PAD);
 
-    // snap
     if (left <= SNAP_PX) left = EDGE_PAD;
     if (top <= SNAP_PX) top = EDGE_PAD;
 
@@ -183,18 +469,12 @@ console.log("AIVE content script loaded", location.href);
     `;
 
     document.body.appendChild(ROOT);
-
-    // position after attach (can measure size now)
     setSafePosition(savedPos);
 
     wireControls();
     blind(ROOT);
     enableDragSnap(ROOT);
   }
-
-  // --------------------------------------------------
-  // CONTROLS
-  // --------------------------------------------------
 
   function updateSlider(key, val) {
     const r = ROOT.querySelector(`input[data-key="${key}"]`);
@@ -240,9 +520,7 @@ console.log("AIVE content script loaded", location.href);
     const helpBtn = ROOT.querySelector(".aive-help");
     if (helpBtn) {
       helpBtn.onclick = () => {
-        alert(
-          "AIVE Help:\n\n• Hover header to open\n• Drag header to move\n• Snaps to edges on release"
-        );
+        openBlacklistDialog(); // or swap to a real help dialog later
       };
     }
 
@@ -272,17 +550,8 @@ console.log("AIVE content script loaded", location.href);
 
     ROOT.querySelector(".aive-disable").onclick = () => ROOT.remove();
 
-    ROOT.querySelector(".aive-blacklist").onclick = async () => {
-      const list = (await get("aive_blacklist")) || [];
-      if (!list.includes(DOMAIN)) list.push(DOMAIN);
-      await set({ aive_blacklist: list });
-      ROOT.remove();
-    };
+    ROOT.querySelector(".aive-blacklist").onclick = () => openBlacklistDialog();
   }
-
-  // --------------------------------------------------
-  // BLIND
-  // --------------------------------------------------
 
   function blind(root) {
     const header = root.querySelector(".aive-header");
@@ -324,10 +593,6 @@ console.log("AIVE content script loaded", location.href);
     };
   }
 
-  // --------------------------------------------------
-  // DRAG + SNAP (POINTER EVENTS)
-  // --------------------------------------------------
-
   function enableDragSnap(root) {
     const header = root.querySelector(".aive-header");
 
@@ -336,9 +601,7 @@ console.log("AIVE content script loaded", location.href);
     let startLeft = 0, startTop = 0;
 
     header.addEventListener("pointerdown", (e) => {
-      // ignore right click
       if (e.button !== 0) return;
-
       dragging = true;
       header.setPointerCapture(e.pointerId);
 
@@ -359,7 +622,6 @@ console.log("AIVE content script loaded", location.href);
       const nextLeft = startLeft + dx;
       const nextTop = startTop + dy;
 
-      // live clamp while moving (keeps it visible)
       const fixed = snapAndClamp(nextLeft, nextTop);
       root.style.left = fixed.left + "px";
       root.style.top = fixed.top + "px";
@@ -371,7 +633,6 @@ console.log("AIVE content script loaded", location.href);
 
       try { header.releasePointerCapture(e.pointerId); } catch {}
 
-      // snap is already applied live; just save
       const left = parseFloat(root.style.left) || root.offsetLeft || 0;
       const top = parseFloat(root.style.top) || root.offsetTop || 0;
       const fixed = snapAndClamp(left, top);
@@ -387,20 +648,17 @@ console.log("AIVE content script loaded", location.href);
     });
   }
 
-  // --------------------------------------------------
   // INIT
-  // --------------------------------------------------
+  (async () => {
+    if (await isBlacklisted()) return;
 
-  get("aive_blacklist").then((list) => {
-    if (Array.isArray(list) && list.includes(DOMAIN)) return;
+    const pos = await get(POS_KEY);
 
-    get(POS_KEY).then((pos) => {
-      const wait = () => {
-        if (!ALIVE) return;
-        if (document.body) createPanel(pos);
-        else requestAnimationFrame(wait);
-      };
-      wait();
-    });
-  });
+    const wait = () => {
+      if (!ALIVE) return;
+      if (document.body) createPanel(pos);
+      else requestAnimationFrame(wait);
+    };
+    wait();
+  })();
 })();
