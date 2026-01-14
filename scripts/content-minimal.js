@@ -1,5 +1,7 @@
+console.log("AIVE content script loaded", location.href);
+
 // ======================================================
-// AIVE – CONTENT SCRIPT (POSITION RESTORE FINAL FIX)
+// AIVE – CONTENT SCRIPT (POSITION RESTORE + OFFSCREEN FIX)
 // ======================================================
 
 (() => {
@@ -24,10 +26,10 @@
       : null;
 
   const get = key =>
-    new Promise(r => STORE ? STORE.get(key, o => r(o[key])) : r(undefined));
+    new Promise(r => (STORE ? STORE.get(key, o => r(o[key])) : r(undefined)));
 
   const set = obj =>
-    new Promise(r => STORE ? STORE.set(obj, r) : r());
+    new Promise(r => (STORE ? STORE.set(obj, r) : r()));
 
   const DOMAIN = location.hostname;
   const POS_KEY = `aive_pos_${DOMAIN}`;
@@ -93,13 +95,42 @@
       </div>`;
   }
 
+  function clamp(n, min, max) {
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function setSafePosition(pos) {
+    // Default
+    let left = 20;
+    let top = 20;
+
+    if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
+      left = pos.left;
+      top = pos.top;
+    }
+
+    // Clamp to viewport so it can't get lost off-screen
+    const vw = window.innerWidth || 1000;
+    const vh = window.innerHeight || 800;
+
+    // Use a small margin; panel is ~360px wide but we don't need perfect math
+    left = clamp(left, 8, vw - 60);
+    top = clamp(top, 8, vh - 60);
+
+    ROOT.style.left = left + "px";
+    ROOT.style.top = top + "px";
+  }
+
   function createPanel(savedPos) {
     ROOT = document.createElement("div");
     ROOT.id = "aive-root";
 
     ROOT.innerHTML = `
       <div class="aive-panel">
-        <div class="aive-header">AIVE ?</div>
+        <div class="aive-header">
+          <span class="aive-title">AIVE</span>
+          <button class="aive-help" type="button" title="Help">?</button>
+        </div>
 
         <div class="aive-clip">
           <div class="aive-body">
@@ -112,7 +143,7 @@
 
             <div class="aive-row">
               <label>Flip Horizontal</label>
-              <button class="aive-flip">Flip</button>
+              <button class="aive-flip" type="button">Flip</button>
             </div>
 
             ${slider("Animation Speed","speed",100,3000,50,animMS)}
@@ -120,10 +151,10 @@
             ${slider("Collapse Delay","delay",0,2000,50,delayMS)}
 
             <div class="aive-buttons">
-              <button class="aive-auto">Auto</button>
-              <button class="aive-reset">Reset</button>
-              <button class="aive-disable">Disable Tab</button>
-              <button class="aive-blacklist">Blacklist Domain</button>
+              <button class="aive-auto" type="button">Auto</button>
+              <button class="aive-reset" type="button">Reset</button>
+              <button class="aive-disable" type="button">Disable Tab</button>
+              <button class="aive-blacklist" type="button">Blacklist Domain</button>
             </div>
 
           </div>
@@ -133,18 +164,22 @@
 
     document.body.appendChild(ROOT);
 
-    // ✅ POSITION — JS OWNS IT
-    if (savedPos) {
-      ROOT.style.left = savedPos.left + "px";
-      ROOT.style.top = savedPos.top + "px";
-    } else {
-      ROOT.style.left = "20px";
-      ROOT.style.top = "20px";
-    }
+    // ✅ POSITION — clamp so it can't disappear off-screen
+    setSafePosition(savedPos);
 
     wireControls();
     blind(ROOT);
     drag(ROOT);
+
+    // Handy: reset position hotkey (Ctrl+Shift+0)
+    window.addEventListener("keydown", async (e) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === "0" || e.code === "Digit0")) {
+        e.preventDefault();
+        ROOT.style.left = "20px";
+        ROOT.style.top = "20px";
+        await set({ [POS_KEY]: { left: 20, top: 20 } });
+      }
+    }, { capture: true });
   }
 
   // --------------------------------------------------
@@ -155,7 +190,11 @@
     const r = ROOT.querySelector(`input[data-key="${key}"]`);
     if (!r) return;
     r.value = val;
-    r.previousElementSibling.querySelector(".aive-val").textContent = val;
+    const lab = r.previousElementSibling;
+    if (lab) {
+      const span = lab.querySelector(".aive-val");
+      if (span) span.textContent = val;
+    }
   }
 
   function wireControls() {
@@ -163,7 +202,11 @@
       r.oninput = () => {
         const k = r.dataset.key;
         const v = Number(r.value);
-        r.previousElementSibling.querySelector(".aive-val").textContent = v;
+        const lab = r.previousElementSibling;
+        if (lab) {
+          const span = lab.querySelector(".aive-val");
+          if (span) span.textContent = v;
+        }
 
         if (k in state) {
           state[k] = v;
@@ -175,10 +218,21 @@
       };
     });
 
-    ROOT.querySelector(".aive-flip").onclick = () => {
-      state.flip = !state.flip;
-      applyEffects();
-    };
+    const flipBtn = ROOT.querySelector(".aive-flip");
+    if (flipBtn) {
+      flipBtn.onclick = () => {
+        state.flip = !state.flip;
+        applyEffects();
+      };
+    }
+
+    const helpBtn = ROOT.querySelector(".aive-help");
+    if (helpBtn) {
+      helpBtn.onclick = () => {
+        // simple placeholder help (you can swap this for a real help dialog)
+        alert("AIVE Help:\n\n• Hover the header to open controls\n• Drag header to move panel\n• Ctrl+Shift+0 resets position");
+      };
+    }
 
     ROOT.querySelector(".aive-auto").onclick = () => {
       state.brightness = 1.1;
@@ -277,6 +331,8 @@
 
       document.onmouseup = async () => {
         document.onmousemove = null;
+        document.onmouseup = null;
+
         await set({
           [POS_KEY]: {
             left: root.offsetLeft,
