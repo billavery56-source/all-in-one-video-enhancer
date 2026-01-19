@@ -13,9 +13,10 @@
   --danger: #7a2b2b;
   --accent: #3a445a;
   --help: #4da3ff;
+  --pin: #ffd36a;
 
   --panel-open-w: 360px;
-  --panel-collapsed-w: 160px;
+  --panel-collapsed-w: 120px;
 
   position: fixed;
   left: 20px;
@@ -114,6 +115,13 @@
   gap: 8px;
 }
 
+/* Header right-side buttons container */
+#aive-root .aive-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
 /* Help button (RIGHT, SMALL, NO EXTRA WIDTH) */
 #aive-root .aive-help {
   width: 18px;
@@ -144,6 +152,42 @@
 
 #aive-root .aive-help:active {
   transform: translateY(1px);
+}
+
+/* Pin button (📌) */
+#aive-root .aive-pin {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+
+  display: inline-grid;
+  place-items: center;
+
+  font-weight: 900;
+  font-size: 15px;
+  line-height: 1;
+
+  cursor: pointer;
+  opacity: 0.95;
+  transition: opacity 140ms ease, transform 80ms ease, filter 140ms ease, color 140ms ease;
+}
+
+#aive-root .aive-pin:hover {
+  opacity: 1;
+  filter: brightness(1.15);
+}
+
+#aive-root .aive-pin:active {
+  transform: translateY(1px);
+}
+
+#aive-root.aive-pinned .aive-pin {
+  color: var(--pin);
 }
 
 /* Blind container (JS animates height) */
@@ -209,8 +253,8 @@
   accent-color: #8ea2ff;
 }
 
-/* IMPORTANT: Style ALL buttons EXCEPT the help button */
-#aive-root button:not(.aive-help) {
+/* IMPORTANT: Style ALL buttons EXCEPT the header tiny buttons */
+#aive-root button:not(.aive-help):not(.aive-pin) {
   width: 100%;
   border: 1px solid var(--border);
   background: var(--btn);
@@ -225,17 +269,17 @@
     background 140ms ease;
 }
 
-#aive-root .aive-row.aive-inline button:not(.aive-help) {
+#aive-root .aive-row.aive-inline button:not(.aive-help):not(.aive-pin) {
   width: auto;
   padding: 8px 10px;
 }
 
-#aive-root button:not(.aive-help):hover {
+#aive-root button:not(.aive-help):not(.aive-pin):hover {
   border-color: var(--accent);
   filter: brightness(1.06);
 }
 
-#aive-root button:not(.aive-help):active {
+#aive-root button:not(.aive-help):not(.aive-pin):active {
   transform: translateY(1px);
 }
 

@@ -2,10 +2,11 @@ console.log("AIVE content script loaded", location.href);
 
 // ======================================================
 // AIVE – CONTENT SCRIPT
-// - Panel anchor: TOP or BOTTOM (toggle)
-// - Stays in viewport (clamp + snap)
-// - Collapsed state shrinks to header-only bar (AIVE + ?)
-// - Auto tries to analyze video pixels (falls back when blocked)
+// - Anchor toggle: TOP/BOTTOM
+// - Double-click header toggles anchor
+// - Pin mode (📌): keeps panel open (no auto-collapse)
+// - Collapsed mode: shrinks to header-only bar (AIVE + 📌 + ?)
+// - Auto-tune analyzes video pixels when allowed; falls back when blocked
 // - Help + Blacklist dialogs always work (even when blacklisted)
 // ======================================================
 
@@ -58,7 +59,6 @@ console.log("AIVE content script loaded", location.href);
     ovl.id = id;
     ovl.tabIndex = -1;
 
-    // Inline styles so page CSS can’t break it
     ovl.style.cssText = `
       position: fixed;
       inset: 0;
@@ -362,7 +362,7 @@ console.log("AIVE content script loaded", location.href);
     ta.setSelectionRange(ta.value.length, ta.value.length);
   }
 
-  function openHelpDialog(anchorMode) {
+  function openHelpDialog(anchorMode, pinned) {
     if (!document.body) return;
 
     const { ovl, titleEl, bodyEl } = makeOverlay(HELP_DIALOG_ID);
@@ -370,13 +370,14 @@ console.log("AIVE content script loaded", location.href);
 
     const sec1 = section("Quick use");
     sec1.h.appendChild(chip(`Anchor: ${anchorMode.toUpperCase()}`));
+    sec1.h.appendChild(chip(pinned ? "Pinned" : "Auto-collapse"));
     sec1.s.appendChild(
       smallMuted(
         "• Hover the header to open the controls.\n" +
-          "• When collapsed, AIVE shrinks to a little bar (AIVE + ?).\n" +
+          "• When collapsed, AIVE shrinks to a little bar (AIVE + 📌 + ?).\n" +
           "• Drag the header to move the panel.\n" +
-          "• Panel snaps to edges when you release near an edge.\n" +
-          "• The Anchor button switches between TOP and BOTTOM.\n" +
+          "• Double-click the header to toggle TOP/BOTTOM anchor.\n" +
+          "• Click 📌 to pin it open.\n" +
           "• Effects apply to the page’s first <video> element."
       )
     );
@@ -500,10 +501,11 @@ console.log("AIVE content script loaded", location.href);
 
   let ROOT;
 
-  // Anchor + position storage:
-  // posStore = { anchor: "top"|"bottom", top: {left, top}, bottom: {left, bottom} }
-  let posStore = { anchor: null, top: null, bottom: null };
+  // posStore (new format):
+  // { anchor, pinned, top:{left,top}, bottom:{left,bottom} }
+  let posStore = { anchor: null, pinned: false, top: null, bottom: null };
   let anchorMode = "bottom";
+  let pinned = false;
 
   function slider(label, key, min, max, step, val) {
     return `
@@ -526,40 +528,31 @@ console.log("AIVE content script loaded", location.href);
   }
 
   function normalizeSavedPos(raw) {
-    // New format:
-    // { anchor, top:{left,top}, bottom:{left,bottom} }
     if (raw && typeof raw === "object") {
-      if (raw.top && raw.bottom) {
+      // New format
+      if (raw.top || raw.bottom || "pinned" in raw || "anchor" in raw) {
         return {
           anchor:
             raw.anchor === "top" || raw.anchor === "bottom" ? raw.anchor : null,
-          top: raw.top,
-          bottom: raw.bottom
+          pinned: !!raw.pinned,
+          top: raw.top || null,
+          bottom: raw.bottom || null
         };
       }
 
-      // Legacy:
-      // {left, top} OR {left, bottom} OR {left, top, bottom}
+      // Legacy formats:
+      // {left, top} or {left, bottom}
       const left = Number.isFinite(raw.left) ? raw.left : 20;
 
       if (Number.isFinite(raw.bottom)) {
-        return {
-          anchor: "bottom",
-          top: null,
-          bottom: { left, bottom: raw.bottom }
-        };
+        return { anchor: "bottom", pinned: false, top: null, bottom: { left, bottom: raw.bottom } };
       }
-
       if (Number.isFinite(raw.top)) {
-        return {
-          anchor: "top",
-          top: { left, top: raw.top },
-          bottom: null
-        };
+        return { anchor: "top", pinned: false, top: { left, top: raw.top }, bottom: null };
       }
     }
 
-    return { anchor: null, top: null, bottom: null };
+    return { anchor: null, pinned: false, top: null, bottom: null };
   }
 
   function currentLeft() {
@@ -652,24 +645,21 @@ console.log("AIVE content script loaded", location.href);
     if (!ROOT) return;
 
     const rect = ROOT.getBoundingClientRect();
-
     const left = rect.left;
     const { h: vh } = viewportSize();
 
+    posStore.pinned = !!pinned;
+
     if (anchorMode === "bottom") {
       const bottom = vh - rect.bottom;
-      posStore.bottom = { left, bottom };
+      posStore.bottom = snapAndClamp(left, bottom, "bottom");
       posStore.anchor = "bottom";
-      const fixed = snapAndClamp(left, bottom, "bottom");
-      setPosition(fixed.left, fixed.bottom, "bottom");
-      posStore.bottom = { left: fixed.left, bottom: fixed.bottom };
+      setPosition(posStore.bottom.left, posStore.bottom.bottom, "bottom");
     } else {
       const top = rect.top;
-      posStore.top = { left, top };
+      posStore.top = snapAndClamp(left, top, "top");
       posStore.anchor = "top";
-      const fixed = snapAndClamp(left, top, "top");
-      setPosition(fixed.left, fixed.top, "top");
-      posStore.top = { left: fixed.left, top: fixed.top };
+      setPosition(posStore.top.left, posStore.top.top, "top");
     }
 
     await set({ [POS_KEY]: posStore, [ANCHOR_KEY]: anchorMode });
@@ -679,18 +669,16 @@ console.log("AIVE content script loaded", location.href);
     if (nextMode !== "top" && nextMode !== "bottom") return;
     if (nextMode === anchorMode) return;
 
-    // Save current spot into the current anchor bucket first
+    // Save current spot into current anchor bucket first
     await persistPosition();
 
-    // Switch mode
     anchorMode = nextMode;
     posStore.anchor = nextMode;
 
-    // Apply classes
     ROOT.classList.toggle("aive-anchor-top", anchorMode === "top");
     ROOT.classList.toggle("aive-anchor-bottom", anchorMode === "bottom");
 
-    // Restore last-known position for that anchor (if any), otherwise convert
+    // Restore last-known position for that anchor, else convert from current rect
     const rect = ROOT.getBoundingClientRect();
     const { h: vh } = viewportSize();
 
@@ -710,44 +698,12 @@ console.log("AIVE content script loaded", location.href);
       posStore.top = { left: fixed.left, top: fixed.top };
     }
 
-    // Update UI button text
     const b = ROOT.querySelector(".aive-anchor-btn");
     if (b) b.textContent = anchorMode === "bottom" ? "Bottom" : "Top";
 
     await set({ [POS_KEY]: posStore, [ANCHOR_KEY]: anchorMode });
     ensureInView();
   }
-
-  function applySavedPosition() {
-    // Apply anchor class first
-    ROOT.classList.toggle("aive-anchor-top", anchorMode === "top");
-    ROOT.classList.toggle("aive-anchor-bottom", anchorMode === "bottom");
-
-    const defLeft = 20;
-
-    if (anchorMode === "bottom") {
-      const saved = posStore.bottom;
-      const left = saved?.left ?? defLeft;
-      const bottom = saved?.bottom ?? 20;
-      const fixed = snapAndClamp(left, bottom, "bottom");
-      setPosition(fixed.left, fixed.bottom, "bottom");
-      posStore.bottom = { left: fixed.left, bottom: fixed.bottom };
-    } else {
-      const saved = posStore.top;
-      const left = saved?.left ?? defLeft;
-      const top = saved?.top ?? 20;
-      const fixed = snapAndClamp(left, top, "top");
-      setPosition(fixed.left, fixed.top, "top");
-      posStore.top = { left: fixed.left, top: fixed.top };
-    }
-
-    // collapsed by default
-    ROOT.classList.add("aive-collapsed");
-  }
-
-  // --------------------------------------------------
-  // UI + TOAST
-  // --------------------------------------------------
 
   function formatNum(n) {
     return Number.isFinite(n)
@@ -804,9 +760,6 @@ console.log("AIVE content script loaded", location.href);
       const rect = ROOT.getBoundingClientRect();
       const margin = 10;
 
-      // Place toast opposite the opening direction:
-      // - bottom-anchored (opens UP): toast goes ABOVE
-      // - top-anchored (opens DOWN): toast goes BELOW
       if (anchorMode === "bottom") {
         const maxLeft = window.innerWidth - el.offsetWidth - margin;
         const left = clamp(rect.left, margin, Math.max(margin, maxLeft));
@@ -848,7 +801,10 @@ console.log("AIVE content script loaded", location.href);
       <div class="aive-panel">
         <div class="aive-header">
           <span class="aive-title">AIVE</span>
-          <button class="aive-help" type="button" title="Help">?</button>
+          <span class="aive-header-actions">
+            <button class="aive-pin" type="button" title="Pin (keep open)">📌</button>
+            <button class="aive-help" type="button" title="Help">?</button>
+          </span>
         </div>
 
         <div class="aive-clip">
@@ -889,81 +845,8 @@ console.log("AIVE content script loaded", location.href);
     document.body.appendChild(ROOT);
   }
 
-  function wireControls() {
-    ROOT.querySelectorAll("input[type=range]").forEach((r) => {
-      r.oninput = () => {
-        const k = r.dataset.key;
-        const v = Number(r.value);
-
-        const lab = r.previousElementSibling;
-        if (lab) {
-          const span = lab.querySelector(".aive-val");
-          if (span) span.textContent = formatNum(v);
-        }
-
-        if (k in state) {
-          state[k] = v;
-          applyEffects();
-        }
-        if (k === "speed") animMS = v;
-        if (k === "inertia") inertia = v;
-        if (k === "delay") delayMS = v;
-      };
-    });
-
-    const flipBtn = ROOT.querySelector(".aive-flip");
-    if (flipBtn) {
-      flipBtn.onclick = () => {
-        state.flip = !state.flip;
-        applyEffects();
-      };
-    }
-
-    const helpBtn = ROOT.querySelector(".aive-help");
-    if (helpBtn) {
-      helpBtn.addEventListener("pointerdown", (e) => e.stopPropagation(), true);
-      helpBtn.onclick = (e) => {
-        e.stopPropagation();
-        openHelpDialog(anchorMode);
-      };
-    }
-
-    const anchorBtn = ROOT.querySelector(".aive-anchor-btn");
-    if (anchorBtn) {
-      anchorBtn.addEventListener("pointerdown", (e) => e.stopPropagation(), true);
-      anchorBtn.onclick = async (e) => {
-        e.stopPropagation();
-        await setAnchorMode(anchorMode === "bottom" ? "top" : "bottom");
-        toast(`Anchor: ${anchorMode.toUpperCase()}`);
-      };
-    }
-
-    ROOT.querySelector(".aive-auto").onclick = () => autoTune();
-
-    ROOT.querySelector(".aive-reset").onclick = () => {
-      Object.assign(state, {
-        brightness: 1,
-        contrast: 1,
-        saturation: 1,
-        sepia: 0,
-        zoom: 1,
-        flip: false
-      });
-      Object.entries(state).forEach(([k, v]) => updateSlider(k, v));
-      applyEffects();
-      toast("Reset: back to defaults");
-    };
-
-    ROOT.querySelector(".aive-disable").onclick = () => {
-      ROOT.remove();
-      toast("AIVE disabled for this tab (reload to bring it back)");
-    };
-
-    ROOT.querySelector(".aive-blacklist").onclick = () => openBlacklistDialog();
-  }
-
   // --------------------------------------------------
-  // AUTO-TUNE: SAMPLE VIDEO FRAME(S) + SUGGEST VALUES
+  // AUTO-TUNE
   // --------------------------------------------------
 
   function clampRange(n, min, max) {
@@ -996,7 +879,7 @@ console.log("AIVE content script loaded", location.href);
 
   async function ensureVideoReady(v) {
     if (!v) return false;
-    if (v.readyState >= 2) return true; // HAVE_CURRENT_DATA
+    if (v.readyState >= 2) return true;
     await waitForEvent(v, "loadeddata", 2200);
     return v.readyState >= 2;
   }
@@ -1036,7 +919,7 @@ console.log("AIVE content script loaded", location.href);
         const g = d[i + 1];
         const b = d[i + 2];
 
-        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b; // 0..255
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
         l += lum;
         l2 += lum * lum;
 
@@ -1057,9 +940,7 @@ console.log("AIVE content script loaded", location.href);
       frames += 1;
     };
 
-    for (let i = 0; i < samples; i++) {
-      await takeOne();
-    }
+    for (let i = 0; i < samples; i++) await takeOne();
 
     if (!frames) return { meanL: 128, stdL: 70, meanS: 0.35 };
 
@@ -1083,7 +964,6 @@ console.log("AIVE content script loaded", location.href);
     c = clampRange(c, 0.9, 1.35);
     s = clampRange(s, 0.9, 1.5);
 
-    // Keep it gentle
     const blend = (v) => 0.55 * v + 0.45 * 1;
 
     return {
@@ -1095,16 +975,10 @@ console.log("AIVE content script loaded", location.href);
 
   async function autoTune() {
     const v = getVideo();
-    if (!v) {
-      toast("Auto: no <video> found on this page");
-      return;
-    }
+    if (!v) return toast("Auto: no <video> found on this page");
 
     const ready = await ensureVideoReady(v);
-    if (!ready) {
-      toast("Auto: video not ready yet (try again in a second)");
-      return;
-    }
+    if (!ready) return toast("Auto: video not ready yet (try again in a second)");
 
     try {
       const m = await sampleVideoMetrics(v, 2);
@@ -1125,7 +999,6 @@ console.log("AIVE content script loaded", location.href);
         )}  S ${formatNum(state.saturation)}`
       );
     } catch (err) {
-      // Common: SecurityError when video is cross-origin and canvas is tainted
       state.brightness = 1.1;
       state.contrast = 1.1;
       state.saturation = 1.15;
@@ -1146,7 +1019,7 @@ console.log("AIVE content script loaded", location.href);
   }
 
   // --------------------------------------------------
-  // BLIND (AUTO-SHRINK ON COLLAPSE)
+  // BLIND (PIN SUPPORT)
   // --------------------------------------------------
 
   function blind(root) {
@@ -1154,14 +1027,18 @@ console.log("AIVE content script loaded", location.href);
     const clip = root.querySelector(".aive-clip");
     const body = root.querySelector(".aive-body");
 
-    let open = false,
-      anim = false,
-      timer;
+    let open = false;
+    let anim = false;
+    let timer;
+
+    const setCollapsed = (isCollapsed) => {
+      root.classList.toggle("aive-collapsed", isCollapsed);
+      requestAnimationFrame(() => ensureInView());
+    };
 
     function maxClipHeight() {
       const { h: vh } = viewportSize();
       const headerH = header.getBoundingClientRect().height || 44;
-      // Keep some padding so it never touches edges
       return Math.max(0, vh - EDGE_PAD * 2 - headerH);
     }
 
@@ -1169,15 +1046,10 @@ console.log("AIVE content script loaded", location.href);
       return Math.min(body.scrollHeight, maxClipHeight());
     }
 
-    function setCollapsed(isCollapsed) {
-      root.classList.toggle("aive-collapsed", isCollapsed);
-      // After width changes, re-clamp
-      requestAnimationFrame(() => ensureInView());
-    }
-
     function animate(to) {
       if (anim) return;
       anim = true;
+
       const from = clip.offsetHeight;
       const delta = to - from;
       const start = performance.now();
@@ -1185,31 +1057,54 @@ console.log("AIVE content script loaded", location.href);
       function step(t) {
         const p = Math.min((t - start) / animMS, 1);
         clip.style.height = from + delta * ease(p) + "px";
+
         if (p < 1) requestAnimationFrame(step);
         else {
           anim = false;
-          // If fully closed, shrink panel bar
           if (to === 0) setCollapsed(true);
         }
       }
+
       requestAnimationFrame(step);
     }
 
-    header.onmouseenter = () => {
+    function openNow() {
       clearTimeout(timer);
-      if (!open) {
-        open = true;
-        setCollapsed(false);
-        animate(openTarget());
-      }
-    };
+      open = true;
+      setCollapsed(false);
+      animate(openTarget());
+    }
 
-    root.onmouseleave = () => {
-      if (!open) return;
+    function closeLater() {
+      if (pinned) return; // ✅ pinned means never auto-collapse
       timer = setTimeout(() => {
         open = false;
         animate(0);
       }, delayMS);
+    }
+
+    header.onmouseenter = () => {
+      if (!open) openNow();
+      else clearTimeout(timer);
+    };
+
+    root.onmouseleave = () => {
+      if (!open) return;
+      closeLater();
+    };
+
+    // Expose helpers for pin toggles / resize refresh
+    return {
+      openNow,
+      closeNow: () => {
+        open = false;
+        animate(0);
+      },
+      refreshOpenHeight: () => {
+        if (!open || pinned === false) return;
+        // If pinned/open, keep it fit to viewport on resizes
+        clip.style.height = openTarget() + "px";
+      }
     };
   }
 
@@ -1220,16 +1115,12 @@ console.log("AIVE content script loaded", location.href);
     let startX = 0,
       startY = 0;
     let startLeft = 0;
-    let startOffset = 0; // top or bottom depending on anchor
+    let startOffset = 0;
 
-    function readOffset() {
-      return anchorMode === "bottom" ? currentBottom() : currentTop();
-    }
+    const readOffset = () => (anchorMode === "bottom" ? currentBottom() : currentTop());
 
     header.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
-
-      // If user clicked any button, do NOT start drag
       if (e.target && e.target.closest && e.target.closest("button")) return;
 
       dragging = true;
@@ -1251,16 +1142,13 @@ console.log("AIVE content script loaded", location.href);
 
       const nextLeft = startLeft + dx;
 
-      let nextOffset;
       if (anchorMode === "bottom") {
-        // moving down decreases bottom distance
-        nextOffset = startOffset - dy;
-        const fixed = snapAndClamp(nextLeft, nextOffset, "bottom");
+        const nextBottom = startOffset - dy;
+        const fixed = snapAndClamp(nextLeft, nextBottom, "bottom");
         setPosition(fixed.left, fixed.bottom, "bottom");
       } else {
-        // top anchor: moving down increases top
-        nextOffset = startOffset + dy;
-        const fixed = snapAndClamp(nextLeft, nextOffset, "top");
+        const nextTop = startOffset + dy;
+        const fixed = snapAndClamp(nextLeft, nextTop, "top");
         setPosition(fixed.left, fixed.top, "top");
       }
     });
@@ -1282,22 +1170,158 @@ console.log("AIVE content script loaded", location.href);
   }
 
   // --------------------------------------------------
+  // WIRING
+  // --------------------------------------------------
+
+  function setPinned(next) {
+    pinned = !!next;
+    posStore.pinned = pinned;
+    ROOT.classList.toggle("aive-pinned", pinned);
+
+    // If pinned, force open and stay open
+    if (pinned) {
+      if (ROOT.__blindApi) ROOT.__blindApi.openNow();
+      toast("Pinned: stays open");
+    } else {
+      toast("Unpinned: auto-collapse enabled");
+    }
+
+    // Persist asap
+    set({ [POS_KEY]: posStore });
+  }
+
+  function wireControls() {
+    ROOT.querySelectorAll("input[type=range]").forEach((r) => {
+      r.oninput = () => {
+        const k = r.dataset.key;
+        const v = Number(r.value);
+
+        const lab = r.previousElementSibling;
+        if (lab) {
+          const span = lab.querySelector(".aive-val");
+          if (span) span.textContent = formatNum(v);
+        }
+
+        if (k in state) {
+          state[k] = v;
+          applyEffects();
+        }
+        if (k === "speed") animMS = v;
+        if (k === "inertia") inertia = v;
+        if (k === "delay") delayMS = v;
+      };
+    });
+
+    const flipBtn = ROOT.querySelector(".aive-flip");
+    if (flipBtn) {
+      flipBtn.onclick = () => {
+        state.flip = !state.flip;
+        applyEffects();
+      };
+    }
+
+    const helpBtn = ROOT.querySelector(".aive-help");
+    if (helpBtn) {
+      helpBtn.addEventListener("pointerdown", (e) => e.stopPropagation(), true);
+      helpBtn.onclick = (e) => {
+        e.stopPropagation();
+        openHelpDialog(anchorMode, pinned);
+      };
+    }
+
+    const pinBtn = ROOT.querySelector(".aive-pin");
+    if (pinBtn) {
+      pinBtn.addEventListener("pointerdown", (e) => e.stopPropagation(), true);
+      pinBtn.onclick = async (e) => {
+        e.stopPropagation();
+        setPinned(!pinned);
+        await persistPosition();
+      };
+    }
+
+    const anchorBtn = ROOT.querySelector(".aive-anchor-btn");
+    if (anchorBtn) {
+      anchorBtn.addEventListener("pointerdown", (e) => e.stopPropagation(), true);
+      anchorBtn.onclick = async (e) => {
+        e.stopPropagation();
+        await setAnchorMode(anchorMode === "bottom" ? "top" : "bottom");
+        toast(`Anchor: ${anchorMode.toUpperCase()}`);
+      };
+    }
+
+    // Double-click header toggles anchor
+    const header = ROOT.querySelector(".aive-header");
+    if (header) {
+      header.addEventListener("dblclick", async (e) => {
+        if (e.target && e.target.closest && e.target.closest("button")) return;
+        await setAnchorMode(anchorMode === "bottom" ? "top" : "bottom");
+        toast(`Anchor: ${anchorMode.toUpperCase()}`);
+      });
+    }
+
+    ROOT.querySelector(".aive-auto").onclick = () => autoTune();
+
+    ROOT.querySelector(".aive-reset").onclick = () => {
+      Object.assign(state, {
+        brightness: 1,
+        contrast: 1,
+        saturation: 1,
+        sepia: 0,
+        zoom: 1,
+        flip: false
+      });
+      Object.entries(state).forEach(([k, v]) => updateSlider(k, v));
+      applyEffects();
+      toast("Reset: back to defaults");
+    };
+
+    ROOT.querySelector(".aive-disable").onclick = () => {
+      ROOT.remove();
+      toast("AIVE disabled for this tab (reload to bring it back)");
+    };
+
+    ROOT.querySelector(".aive-blacklist").onclick = () => openBlacklistDialog();
+  }
+
+  function applySavedPosition() {
+    ROOT.classList.toggle("aive-anchor-top", anchorMode === "top");
+    ROOT.classList.toggle("aive-anchor-bottom", anchorMode === "bottom");
+
+    const defLeft = 20;
+
+    if (anchorMode === "bottom") {
+      const saved = posStore.bottom;
+      const left = saved?.left ?? defLeft;
+      const bottom = saved?.bottom ?? 20;
+      const fixed = snapAndClamp(left, bottom, "bottom");
+      setPosition(fixed.left, fixed.bottom, "bottom");
+      posStore.bottom = { left: fixed.left, bottom: fixed.bottom };
+    } else {
+      const saved = posStore.top;
+      const left = saved?.left ?? defLeft;
+      const top = saved?.top ?? 20;
+      const fixed = snapAndClamp(left, top, "top");
+      setPosition(fixed.left, fixed.top, "top");
+      posStore.top = { left: fixed.left, top: fixed.top };
+    }
+
+    // Start collapsed unless pinned
+    ROOT.classList.toggle("aive-collapsed", !pinned);
+    ROOT.classList.toggle("aive-pinned", pinned);
+  }
+
+  // --------------------------------------------------
   // INIT
   // --------------------------------------------------
 
   (async () => {
-    // dialogs always work, but skip panel/effects when blacklisted
     if (await isBlacklisted()) return;
 
-    const rawPos = await get(POS_KEY);
-    posStore = normalizeSavedPos(rawPos);
+    posStore = normalizeSavedPos(await get(POS_KEY));
+    pinned = !!posStore.pinned;
 
     const globalAnchor = (await get(ANCHOR_KEY)) || null;
 
-    // Choose anchor priority:
-    // 1) last-used per-site anchor (posStore.anchor)
-    // 2) global anchor setting
-    // 3) bottom
     anchorMode =
       posStore.anchor ||
       (globalAnchor === "top" || globalAnchor === "bottom"
@@ -1310,26 +1334,37 @@ console.log("AIVE content script loaded", location.href);
 
       createPanel();
 
-      applySavedPosition();
-
       // Set anchor button label
       const b = ROOT.querySelector(".aive-anchor-btn");
       if (b) b.textContent = anchorMode === "bottom" ? "Bottom" : "Top";
 
+      // Apply stored position + pin state
+      applySavedPosition();
+
       wireControls();
-      blind(ROOT);
+
+      // Setup blind + keep API reference
+      ROOT.__blindApi = blind(ROOT);
+
       enableDragSnap(ROOT);
 
+      // If pinned, open immediately
+      if (pinned) ROOT.__blindApi.openNow();
+
       // clamp on resize / zoom changes
-      window.addEventListener("resize", ensureInView, { passive: true });
-      window.visualViewport?.addEventListener?.("resize", ensureInView, {
+      const onResize = () => {
+        ensureInView();
+        if (ROOT.__blindApi) ROOT.__blindApi.refreshOpenHeight();
+      };
+
+      window.addEventListener("resize", onResize, { passive: true });
+      window.visualViewport?.addEventListener?.("resize", onResize, {
         passive: true
       });
 
-      // Persist normalized format (so old installs migrate quietly)
+      // Persist normalized format (migration)
       set({ [POS_KEY]: posStore, [ANCHOR_KEY]: anchorMode });
 
-      // If video exists, apply defaults (no-op if none)
       applyEffects();
     };
 
