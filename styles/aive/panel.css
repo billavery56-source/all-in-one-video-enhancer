@@ -14,9 +14,13 @@
   --accent: #3a445a;
   --help: #4da3ff;
 
+  --panel-open-w: 360px;
+  --panel-collapsed-w: 160px;
+
   position: fixed;
   left: 20px;
   top: 20px;
+  bottom: auto;
   z-index: 2147483647;
   display: block;
 
@@ -27,6 +31,16 @@
   pointer-events: auto;
 }
 
+#aive-root.aive-anchor-bottom {
+  top: auto;
+  bottom: 20px;
+}
+
+#aive-root.aive-anchor-top {
+  top: 20px;
+  bottom: auto;
+}
+
 #aive-root,
 #aive-root * {
   box-sizing: border-box;
@@ -34,30 +48,59 @@
 
 /* Main panel */
 #aive-root .aive-panel {
-  width: 360px;
+  display: flex;
+  flex-direction: column;
+  width: var(--panel-open-w);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 14px;
   overflow: hidden;
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+  transition: width 160ms ease;
+}
+
+/* Shrink when collapsed (header stays visible) */
+#aive-root.aive-collapsed .aive-panel {
+  width: var(--panel-collapsed-w);
+}
+
+/* Blind direction depends on anchor */
+#aive-root.aive-anchor-bottom .aive-panel {
+  flex-direction: column-reverse; /* header at bottom, body expands upward */
+}
+
+#aive-root.aive-anchor-top .aive-panel {
+  flex-direction: column; /* header at top, body expands downward */
 }
 
 /* Header */
 #aive-root .aive-header {
   display: flex;
   align-items: center;
-  justify-content: space-between; /* <-- guarantees left title, right help */
+  justify-content: space-between;
   gap: 10px;
 
   padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0)
+  );
 
   font-weight: 900;
   font-size: 13px;
   letter-spacing: 0.25px;
 
   cursor: grab;
+}
+
+/* Divider line depends on anchor */
+#aive-root.aive-anchor-top .aive-header {
+  border-bottom: 1px solid var(--border);
+}
+
+#aive-root.aive-anchor-bottom .aive-header {
+  border-top: 1px solid var(--border);
 }
 
 #aive-root .aive-header:active {
@@ -73,11 +116,11 @@
 
 /* Help button (RIGHT, SMALL, NO EXTRA WIDTH) */
 #aive-root .aive-help {
-  width: 18px;               /* <-- small */
+  width: 18px;
   height: 18px;
-  min-width: 18px;           /* <-- prevents wide button sizing */
-  padding: 0;                /* <-- no padding */
-  margin: 0;                 /* <-- no margin */
+  min-width: 18px;
+  padding: 0;
+  margin: 0;
   border: none;
   background: transparent;
   color: var(--help);
@@ -110,6 +153,8 @@
 }
 
 #aive-root .aive-body {
+  height: 100%;
+  overflow: auto;
   padding: 10px;
   background: var(--bg);
 }
@@ -127,6 +172,12 @@
   border: 1px solid rgba(255, 255, 255, 0.05);
 
   margin-bottom: 8px;
+}
+
+/* Inline row: label + small button */
+#aive-root .aive-row.aive-inline {
+  grid-template-columns: 1fr auto;
+  align-items: center;
 }
 
 #aive-root .aive-row label {
@@ -170,7 +221,13 @@
   font-weight: 850;
 
   cursor: pointer;
-  transition: border-color 140ms ease, transform 80ms ease, filter 140ms ease, background 140ms ease;
+  transition: border-color 140ms ease, transform 80ms ease, filter 140ms ease,
+    background 140ms ease;
+}
+
+#aive-root .aive-row.aive-inline button:not(.aive-help) {
+  width: auto;
+  padding: 8px 10px;
 }
 
 #aive-root button:not(.aive-help):hover {

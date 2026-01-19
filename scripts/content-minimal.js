@@ -1,7 +1,12 @@
 console.log("AIVE content script loaded", location.href);
 
 // ======================================================
-// AIVE – CONTENT SCRIPT (DRAG + SNAP + HELP DIALOG + BLACKLIST HOTKEY)
+// AIVE – CONTENT SCRIPT
+// - Panel anchor: TOP or BOTTOM (toggle)
+// - Stays in viewport (clamp + snap)
+// - Collapsed state shrinks to header-only bar (AIVE + ?)
+// - Auto tries to analyze video pixels (falls back when blocked)
+// - Help + Blacklist dialogs always work (even when blacklisted)
 // ======================================================
 
 (() => {
@@ -19,19 +24,20 @@ console.log("AIVE content script loaded", location.href);
   // --------------------------------------------------
 
   const STORE =
-    typeof chrome !== "undefined" &&
-    chrome.storage &&
-    chrome.storage.local
+    typeof chrome !== "undefined" && chrome.storage && chrome.storage.local
       ? chrome.storage.local
       : null;
 
   const get = (key) =>
-    new Promise((r) => (STORE ? STORE.get(key, (o) => r(o[key])) : r(undefined)));
+    new Promise((r) =>
+      STORE ? STORE.get(key, (o) => r(o[key])) : r(undefined)
+    );
 
   const set = (obj) => new Promise((r) => (STORE ? STORE.set(obj, r) : r()));
 
   const DOMAIN = location.hostname;
   const POS_KEY = `aive_pos_${DOMAIN}`;
+  const ANCHOR_KEY = `aive_anchor_mode`; // global
 
   // --------------------------------------------------
   // DIALOGS (HELP + BLACKLIST) — WORK EVERYWHERE
@@ -52,7 +58,7 @@ console.log("AIVE content script loaded", location.href);
     ovl.id = id;
     ovl.tabIndex = -1;
 
-    // Inline "critical" styles so the dialog cannot be hidden by page CSS
+    // Inline styles so page CSS can’t break it
     ovl.style.cssText = `
       position: fixed;
       inset: 0;
@@ -130,7 +136,6 @@ console.log("AIVE content script loaded", location.href);
       max-height: calc(min(84vh, 900px) - 56px);
     `;
 
-    // Close wiring
     const close = () => ovl.remove();
 
     backdrop.addEventListener("click", close);
@@ -147,7 +152,6 @@ console.log("AIVE content script loaded", location.href);
       true
     );
 
-    // Prevent clicks inside card from closing
     card.addEventListener("click", (e) => e.stopPropagation());
 
     card.appendChild(top);
@@ -166,6 +170,7 @@ console.log("AIVE content script loaded", location.href);
       color: #a7b0c0;
       font-size: 12px;
       line-height: 1.4;
+      white-space: pre-wrap;
     `;
     return p;
   }
@@ -255,7 +260,10 @@ console.log("AIVE content script loaded", location.href);
     const sec = section("Domains");
     sec.h.appendChild(chip("Alt + Shift + B"));
 
-    const hint = smallMuted("One domain per line. You can paste full URLs too — AIVE will extract the hostname.");
+    const hint = smallMuted(
+      "One domain per line. You can paste full URLs too — AIVE will extract the hostname."
+    );
+
     const ta = document.createElement("textarea");
     ta.spellcheck = false;
     ta.value = text;
@@ -274,8 +282,14 @@ console.log("AIVE content script loaded", location.href);
       font-size: 13px;
       line-height: 1.35;
     `;
-    ta.addEventListener("focus", () => (ta.style.borderColor = "rgba(77,163,255,0.55)"));
-    ta.addEventListener("blur", () => (ta.style.borderColor = "rgba(255,255,255,0.14)"));
+    ta.addEventListener(
+      "focus",
+      () => (ta.style.borderColor = "rgba(77,163,255,0.55)")
+    );
+    ta.addEventListener(
+      "blur",
+      () => (ta.style.borderColor = "rgba(255,255,255,0.14)")
+    );
 
     const btnRow = document.createElement("div");
     btnRow.style.cssText = `
@@ -291,7 +305,13 @@ console.log("AIVE content script loaded", location.href);
       b.textContent = label;
       b.style.cssText = `
         border: 1px solid rgba(255,255,255,0.14);
-        background: ${kind === "secondary" ? "transparent" : kind === "danger" ? "#7a2b2b" : "#2a3140"};
+        background: ${
+          kind === "secondary"
+            ? "transparent"
+            : kind === "danger"
+            ? "#7a2b2b"
+            : "#2a3140"
+        };
         color: #e9eef7;
         border-radius: 12px;
         padding: 10px 10px;
@@ -342,20 +362,22 @@ console.log("AIVE content script loaded", location.href);
     ta.setSelectionRange(ta.value.length, ta.value.length);
   }
 
-  function openHelpDialog() {
+  function openHelpDialog(anchorMode) {
     if (!document.body) return;
 
     const { ovl, titleEl, bodyEl } = makeOverlay(HELP_DIALOG_ID);
     titleEl.textContent = "AIVE Help";
 
     const sec1 = section("Quick use");
-    sec1.h.appendChild(chip("No alerts"));
+    sec1.h.appendChild(chip(`Anchor: ${anchorMode.toUpperCase()}`));
     sec1.s.appendChild(
       smallMuted(
         "• Hover the header to open the controls.\n" +
-        "• Drag the header to move the panel.\n" +
-        "• Panel snaps to edges when you release near an edge.\n" +
-        "• Effects apply to the page’s first <video> element."
+          "• When collapsed, AIVE shrinks to a little bar (AIVE + ?).\n" +
+          "• Drag the header to move the panel.\n" +
+          "• Panel snaps to edges when you release near an edge.\n" +
+          "• The Anchor button switches between TOP and BOTTOM.\n" +
+          "• Effects apply to the page’s first <video> element."
       )
     );
 
@@ -364,21 +386,15 @@ console.log("AIVE content script loaded", location.href);
     sec2.s.appendChild(
       smallMuted(
         "Opens the Blacklist Manager on any normal website (even if the site is blacklisted).\n" +
-        "If it doesn’t fire, check chrome://extensions/shortcuts."
+          "If it doesn’t fire, check chrome://extensions/shortcuts."
       )
     );
 
-    const sec3 = section("What the sliders do");
+    const sec3 = section("Auto (important)");
     sec3.s.appendChild(
       smallMuted(
-        "Brightness – light/dark\n" +
-        "Contrast – separation/pop\n" +
-        "Saturation – color intensity\n" +
-        "Sepia – warm tone\n" +
-        "Zoom – scale the video\n\n" +
-        "Animation Speed – blind open/close speed\n" +
-        "Blind Weight – easing strength\n" +
-        "Collapse Delay – how long before it collapses after mouse leaves"
+        "Auto tries to sample video pixels to pick settings.\n" +
+          "Some sites block pixel sampling (cross-origin video). On those sites, Auto falls back to a gentle preset."
       )
     );
 
@@ -400,7 +416,12 @@ console.log("AIVE content script loaded", location.href);
       ovl.remove();
       openBlacklistDialog();
     };
-    sec4.s.appendChild(smallMuted("Blacklisted sites won’t show the panel/effects, but the blacklist dialog is always available."), openBL);
+    sec4.s.appendChild(
+      smallMuted(
+        "Blacklisted sites won’t show the panel/effects, but the blacklist dialog is always available."
+      ),
+      openBL
+    );
 
     bodyEl.append(sec1.s, sec2.s, sec3.s, sec4.s);
 
@@ -424,7 +445,8 @@ console.log("AIVE content script loaded", location.href);
       if (e.altKey && e.shiftKey && (e.key === "B" || e.key === "b")) {
         const t = e.target;
         const tag = t && t.tagName ? t.tagName.toLowerCase() : "";
-        const typing = tag === "input" || tag === "textarea" || (t && t.isContentEditable);
+        const typing =
+          tag === "input" || tag === "textarea" || (t && t.isContentEditable);
         if (!typing) {
           e.preventDefault();
           openBlacklistDialog();
@@ -478,6 +500,11 @@ console.log("AIVE content script loaded", location.href);
 
   let ROOT;
 
+  // Anchor + position storage:
+  // posStore = { anchor: "top"|"bottom", top: {left, top}, bottom: {left, bottom} }
+  let posStore = { anchor: null, top: null, bottom: null };
+  let anchorMode = "bottom";
+
   function slider(label, key, min, max, step, val) {
     return `
       <div class="aive-row">
@@ -498,7 +525,64 @@ console.log("AIVE content script loaded", location.href);
     return { w: window.innerWidth || 1000, h: window.innerHeight || 800 };
   }
 
-  function snapAndClamp(left, top) {
+  function normalizeSavedPos(raw) {
+    // New format:
+    // { anchor, top:{left,top}, bottom:{left,bottom} }
+    if (raw && typeof raw === "object") {
+      if (raw.top && raw.bottom) {
+        return {
+          anchor:
+            raw.anchor === "top" || raw.anchor === "bottom" ? raw.anchor : null,
+          top: raw.top,
+          bottom: raw.bottom
+        };
+      }
+
+      // Legacy:
+      // {left, top} OR {left, bottom} OR {left, top, bottom}
+      const left = Number.isFinite(raw.left) ? raw.left : 20;
+
+      if (Number.isFinite(raw.bottom)) {
+        return {
+          anchor: "bottom",
+          top: null,
+          bottom: { left, bottom: raw.bottom }
+        };
+      }
+
+      if (Number.isFinite(raw.top)) {
+        return {
+          anchor: "top",
+          top: { left, top: raw.top },
+          bottom: null
+        };
+      }
+    }
+
+    return { anchor: null, top: null, bottom: null };
+  }
+
+  function currentLeft() {
+    const v = parseFloat(ROOT.style.left);
+    if (Number.isFinite(v)) return v;
+    return ROOT.getBoundingClientRect().left || 0;
+  }
+
+  function currentTop() {
+    const v = parseFloat(ROOT.style.top);
+    if (Number.isFinite(v)) return v;
+    return ROOT.getBoundingClientRect().top || 0;
+  }
+
+  function currentBottom() {
+    const v = parseFloat(ROOT.style.bottom);
+    if (Number.isFinite(v)) return v;
+    const rect = ROOT.getBoundingClientRect();
+    const { h: vh } = viewportSize();
+    return vh - rect.bottom;
+  }
+
+  function snapAndClamp(left, offset, anchor) {
     const rect = ROOT.getBoundingClientRect();
     const panelW = rect.width || 360;
     const panelH = rect.height || 80;
@@ -506,32 +590,257 @@ console.log("AIVE content script loaded", location.href);
     const { w: vw, h: vh } = viewportSize();
 
     left = clamp(left, EDGE_PAD, vw - panelW - EDGE_PAD);
-    top = clamp(top, EDGE_PAD, vh - panelH - EDGE_PAD);
 
-    if (left <= SNAP_PX) left = EDGE_PAD;
-    if (top <= SNAP_PX) top = EDGE_PAD;
+    if (anchor === "bottom") {
+      let bottom = clamp(offset, EDGE_PAD, vh - panelH - EDGE_PAD);
 
-    const distRight = vw - (left + panelW);
-    const distBottom = vh - (top + panelH);
+      if (left <= SNAP_PX) left = EDGE_PAD;
+      if (bottom <= SNAP_PX) bottom = EDGE_PAD;
 
-    if (distRight <= SNAP_PX) left = vw - panelW - EDGE_PAD;
-    if (distBottom <= SNAP_PX) top = vh - panelH - EDGE_PAD;
+      const distRight = vw - (left + panelW);
+      const distTop = vh - (bottom + panelH);
 
-    return { left, top };
-  }
+      if (distRight <= SNAP_PX) left = vw - panelW - EDGE_PAD;
+      if (distTop <= SNAP_PX) bottom = vh - panelH - EDGE_PAD;
 
-  function setSafePosition(pos) {
-    let left = 20, top = 20;
-    if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
-      left = pos.left;
-      top = pos.top;
+      return { left, bottom };
+    } else {
+      let top = clamp(offset, EDGE_PAD, vh - panelH - EDGE_PAD);
+
+      if (left <= SNAP_PX) left = EDGE_PAD;
+      if (top <= SNAP_PX) top = EDGE_PAD;
+
+      const distRight = vw - (left + panelW);
+      const distBottom = vh - (top + panelH);
+
+      if (distRight <= SNAP_PX) left = vw - panelW - EDGE_PAD;
+      if (distBottom <= SNAP_PX) top = vh - panelH - EDGE_PAD;
+
+      return { left, top };
     }
-    const fixed = snapAndClamp(left, top);
-    ROOT.style.left = fixed.left + "px";
-    ROOT.style.top = fixed.top + "px";
   }
 
-  function createPanel(savedPos) {
+  function setPosition(left, offset, anchor) {
+    ROOT.style.left = left + "px";
+
+    if (anchor === "bottom") {
+      ROOT.style.bottom = offset + "px";
+      ROOT.style.top = "auto";
+    } else {
+      ROOT.style.top = offset + "px";
+      ROOT.style.bottom = "auto";
+    }
+  }
+
+  function ensureInView() {
+    if (!ROOT) return;
+
+    const left = currentLeft();
+
+    if (anchorMode === "bottom") {
+      const bottom = currentBottom();
+      const fixed = snapAndClamp(left, bottom, "bottom");
+      setPosition(fixed.left, fixed.bottom, "bottom");
+    } else {
+      const top = currentTop();
+      const fixed = snapAndClamp(left, top, "top");
+      setPosition(fixed.left, fixed.top, "top");
+    }
+  }
+
+  async function persistPosition() {
+    if (!ROOT) return;
+
+    const rect = ROOT.getBoundingClientRect();
+
+    const left = rect.left;
+    const { h: vh } = viewportSize();
+
+    if (anchorMode === "bottom") {
+      const bottom = vh - rect.bottom;
+      posStore.bottom = { left, bottom };
+      posStore.anchor = "bottom";
+      const fixed = snapAndClamp(left, bottom, "bottom");
+      setPosition(fixed.left, fixed.bottom, "bottom");
+      posStore.bottom = { left: fixed.left, bottom: fixed.bottom };
+    } else {
+      const top = rect.top;
+      posStore.top = { left, top };
+      posStore.anchor = "top";
+      const fixed = snapAndClamp(left, top, "top");
+      setPosition(fixed.left, fixed.top, "top");
+      posStore.top = { left: fixed.left, top: fixed.top };
+    }
+
+    await set({ [POS_KEY]: posStore, [ANCHOR_KEY]: anchorMode });
+  }
+
+  async function setAnchorMode(nextMode) {
+    if (nextMode !== "top" && nextMode !== "bottom") return;
+    if (nextMode === anchorMode) return;
+
+    // Save current spot into the current anchor bucket first
+    await persistPosition();
+
+    // Switch mode
+    anchorMode = nextMode;
+    posStore.anchor = nextMode;
+
+    // Apply classes
+    ROOT.classList.toggle("aive-anchor-top", anchorMode === "top");
+    ROOT.classList.toggle("aive-anchor-bottom", anchorMode === "bottom");
+
+    // Restore last-known position for that anchor (if any), otherwise convert
+    const rect = ROOT.getBoundingClientRect();
+    const { h: vh } = viewportSize();
+
+    if (anchorMode === "bottom") {
+      const saved = posStore.bottom;
+      const bottom = saved?.bottom ?? vh - rect.bottom;
+      const left = saved?.left ?? rect.left;
+      const fixed = snapAndClamp(left, bottom, "bottom");
+      setPosition(fixed.left, fixed.bottom, "bottom");
+      posStore.bottom = { left: fixed.left, bottom: fixed.bottom };
+    } else {
+      const saved = posStore.top;
+      const top = saved?.top ?? rect.top;
+      const left = saved?.left ?? rect.left;
+      const fixed = snapAndClamp(left, top, "top");
+      setPosition(fixed.left, fixed.top, "top");
+      posStore.top = { left: fixed.left, top: fixed.top };
+    }
+
+    // Update UI button text
+    const b = ROOT.querySelector(".aive-anchor-btn");
+    if (b) b.textContent = anchorMode === "bottom" ? "Bottom" : "Top";
+
+    await set({ [POS_KEY]: posStore, [ANCHOR_KEY]: anchorMode });
+    ensureInView();
+  }
+
+  function applySavedPosition() {
+    // Apply anchor class first
+    ROOT.classList.toggle("aive-anchor-top", anchorMode === "top");
+    ROOT.classList.toggle("aive-anchor-bottom", anchorMode === "bottom");
+
+    const defLeft = 20;
+
+    if (anchorMode === "bottom") {
+      const saved = posStore.bottom;
+      const left = saved?.left ?? defLeft;
+      const bottom = saved?.bottom ?? 20;
+      const fixed = snapAndClamp(left, bottom, "bottom");
+      setPosition(fixed.left, fixed.bottom, "bottom");
+      posStore.bottom = { left: fixed.left, bottom: fixed.bottom };
+    } else {
+      const saved = posStore.top;
+      const left = saved?.left ?? defLeft;
+      const top = saved?.top ?? 20;
+      const fixed = snapAndClamp(left, top, "top");
+      setPosition(fixed.left, fixed.top, "top");
+      posStore.top = { left: fixed.left, top: fixed.top };
+    }
+
+    // collapsed by default
+    ROOT.classList.add("aive-collapsed");
+  }
+
+  // --------------------------------------------------
+  // UI + TOAST
+  // --------------------------------------------------
+
+  function formatNum(n) {
+    return Number.isFinite(n)
+      ? (Math.round(n * 100) / 100).toFixed(2)
+      : String(n);
+  }
+
+  function updateSlider(key, val) {
+    const r = ROOT.querySelector(`input[data-key="${key}"]`);
+    if (!r) return;
+    r.value = val;
+
+    const lab = r.previousElementSibling;
+    if (lab) {
+      const span = lab.querySelector(".aive-val");
+      if (span) span.textContent = formatNum(Number(val));
+    }
+  }
+
+  let TOAST_TIMER;
+  function toast(text, ms = 2200) {
+    try {
+      if (!ROOT || !document.body) return;
+
+      let el = document.getElementById("aive-toast");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "aive-toast";
+        el.style.cssText = `
+          position: fixed;
+          z-index: 2147483647;
+          left: 0;
+          top: auto;
+          bottom: auto;
+          max-width: min(420px, 92vw);
+
+          background: rgba(15,17,21,0.92);
+          color: #e9eef7;
+          border: 1px solid rgba(255,255,255,0.14);
+          border-radius: 12px;
+          padding: 10px 12px;
+          font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+          box-shadow: 0 12px 34px rgba(0,0,0,0.55);
+          pointer-events: none;
+          opacity: 0;
+          transition: opacity 160ms ease;
+        `;
+        document.body.appendChild(el);
+      }
+
+      el.textContent = text;
+      el.style.opacity = "1";
+
+      const rect = ROOT.getBoundingClientRect();
+      const margin = 10;
+
+      // Place toast opposite the opening direction:
+      // - bottom-anchored (opens UP): toast goes ABOVE
+      // - top-anchored (opens DOWN): toast goes BELOW
+      if (anchorMode === "bottom") {
+        const maxLeft = window.innerWidth - el.offsetWidth - margin;
+        const left = clamp(rect.left, margin, Math.max(margin, maxLeft));
+        const bottom = clamp(
+          window.innerHeight - rect.top + margin,
+          margin,
+          window.innerHeight - margin
+        );
+        el.style.left = left + "px";
+        el.style.bottom = bottom + "px";
+        el.style.top = "auto";
+      } else {
+        const maxLeft = window.innerWidth - el.offsetWidth - margin;
+        const left = clamp(rect.left, margin, Math.max(margin, maxLeft));
+        const top = clamp(rect.bottom + margin, margin, window.innerHeight - margin);
+        el.style.left = left + "px";
+        el.style.top = top + "px";
+        el.style.bottom = "auto";
+      }
+
+      clearTimeout(TOAST_TIMER);
+      TOAST_TIMER = setTimeout(() => {
+        if (el) el.style.opacity = "0";
+      }, ms);
+    } catch {
+      // ignore
+    }
+  }
+
+  // --------------------------------------------------
+  // PANEL CREATION
+  // --------------------------------------------------
+
+  function createPanel() {
     ROOT = document.createElement("div");
     ROOT.id = "aive-root";
 
@@ -545,20 +854,25 @@ console.log("AIVE content script loaded", location.href);
         <div class="aive-clip">
           <div class="aive-body">
 
-            ${slider("Brightness","brightness",0,2,0.01,1)}
-            ${slider("Contrast","contrast",0,2,0.01,1)}
-            ${slider("Saturation","saturation",0,2,0.01,1)}
-            ${slider("Sepia","sepia",0,1,0.01,0)}
-            ${slider("Zoom","zoom",1,2,0.01,1)}
+            ${slider("Brightness", "brightness", 0, 2, 0.01, 1)}
+            ${slider("Contrast", "contrast", 0, 2, 0.01, 1)}
+            ${slider("Saturation", "saturation", 0, 2, 0.01, 1)}
+            ${slider("Sepia", "sepia", 0, 1, 0.01, 0)}
+            ${slider("Zoom", "zoom", 1, 2, 0.01, 1)}
 
-            <div class="aive-row">
+            <div class="aive-row aive-inline">
+              <label>Anchor</label>
+              <button class="aive-anchor-btn" type="button">Bottom</button>
+            </div>
+
+            <div class="aive-row aive-inline">
               <label>Flip Horizontal</label>
               <button class="aive-flip" type="button">Flip</button>
             </div>
 
-            ${slider("Animation Speed","speed",100,3000,50,animMS)}
-            ${slider("Blind Weight","inertia",1,4,0.1,inertia)}
-            ${slider("Collapse Delay","delay",0,2000,50,delayMS)}
+            ${slider("Animation Speed", "speed", 100, 3000, 50, animMS)}
+            ${slider("Blind Weight", "inertia", 1, 4, 0.1, inertia)}
+            ${slider("Collapse Delay", "delay", 0, 2000, 50, delayMS)}
 
             <div class="aive-buttons">
               <button class="aive-auto" type="button">Auto</button>
@@ -573,22 +887,6 @@ console.log("AIVE content script loaded", location.href);
     `;
 
     document.body.appendChild(ROOT);
-    setSafePosition(savedPos);
-
-    wireControls();
-    blind(ROOT);
-    enableDragSnap(ROOT);
-  }
-
-  function updateSlider(key, val) {
-    const r = ROOT.querySelector(`input[data-key="${key}"]`);
-    if (!r) return;
-    r.value = val;
-    const lab = r.previousElementSibling;
-    if (lab) {
-      const span = lab.querySelector(".aive-val");
-      if (span) span.textContent = val;
-    }
   }
 
   function wireControls() {
@@ -600,7 +898,7 @@ console.log("AIVE content script loaded", location.href);
         const lab = r.previousElementSibling;
         if (lab) {
           const span = lab.querySelector(".aive-val");
-          if (span) span.textContent = v;
+          if (span) span.textContent = formatNum(v);
         }
 
         if (k in state) {
@@ -623,24 +921,24 @@ console.log("AIVE content script loaded", location.href);
 
     const helpBtn = ROOT.querySelector(".aive-help");
     if (helpBtn) {
-      // Prevent header drag from hijacking click
       helpBtn.addEventListener("pointerdown", (e) => e.stopPropagation(), true);
       helpBtn.onclick = (e) => {
         e.stopPropagation();
-        openHelpDialog();
+        openHelpDialog(anchorMode);
       };
     }
 
-    ROOT.querySelector(".aive-auto").onclick = () => {
-      state.brightness = 1.1;
-      state.contrast = 1.1;
-      state.saturation = 1.15;
+    const anchorBtn = ROOT.querySelector(".aive-anchor-btn");
+    if (anchorBtn) {
+      anchorBtn.addEventListener("pointerdown", (e) => e.stopPropagation(), true);
+      anchorBtn.onclick = async (e) => {
+        e.stopPropagation();
+        await setAnchorMode(anchorMode === "bottom" ? "top" : "bottom");
+        toast(`Anchor: ${anchorMode.toUpperCase()}`);
+      };
+    }
 
-      updateSlider("brightness", state.brightness);
-      updateSlider("contrast", state.contrast);
-      updateSlider("saturation", state.saturation);
-      applyEffects();
-    };
+    ROOT.querySelector(".aive-auto").onclick = () => autoTune();
 
     ROOT.querySelector(".aive-reset").onclick = () => {
       Object.assign(state, {
@@ -653,12 +951,203 @@ console.log("AIVE content script loaded", location.href);
       });
       Object.entries(state).forEach(([k, v]) => updateSlider(k, v));
       applyEffects();
+      toast("Reset: back to defaults");
     };
 
-    ROOT.querySelector(".aive-disable").onclick = () => ROOT.remove();
+    ROOT.querySelector(".aive-disable").onclick = () => {
+      ROOT.remove();
+      toast("AIVE disabled for this tab (reload to bring it back)");
+    };
 
     ROOT.querySelector(".aive-blacklist").onclick = () => openBlacklistDialog();
   }
+
+  // --------------------------------------------------
+  // AUTO-TUNE: SAMPLE VIDEO FRAME(S) + SUGGEST VALUES
+  // --------------------------------------------------
+
+  function clampRange(n, min, max) {
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function waitForEvent(target, event, timeoutMs = 2000) {
+    return new Promise((resolve) => {
+      let done = false;
+      const on = () => {
+        if (done) return;
+        done = true;
+        cleanup();
+        resolve(true);
+      };
+      const cleanup = () => {
+        try {
+          target.removeEventListener(event, on);
+        } catch {}
+      };
+      target.addEventListener(event, on, { once: true });
+      setTimeout(() => {
+        if (done) return;
+        done = true;
+        cleanup();
+        resolve(false);
+      }, timeoutMs);
+    });
+  }
+
+  async function ensureVideoReady(v) {
+    if (!v) return false;
+    if (v.readyState >= 2) return true; // HAVE_CURRENT_DATA
+    await waitForEvent(v, "loadeddata", 2200);
+    return v.readyState >= 2;
+  }
+
+  async function sampleVideoMetrics(v, samples = 2) {
+    const W = 72;
+    const H = 40;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+    let sumL = 0;
+    let sumStd = 0;
+    let sumS = 0;
+    let frames = 0;
+
+    const takeOne = async () => {
+      if (typeof v.requestVideoFrameCallback === "function") {
+        await new Promise((r) => v.requestVideoFrameCallback(() => r()));
+      } else {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      ctx.drawImage(v, 0, 0, W, H);
+      const img = ctx.getImageData(0, 0, W, H);
+      const d = img.data;
+      const px = d.length / 4;
+
+      let l = 0;
+      let l2 = 0;
+      let s = 0;
+
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i];
+        const g = d[i + 1];
+        const b = d[i + 2];
+
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b; // 0..255
+        l += lum;
+        l2 += lum * lum;
+
+        const mx = r > g ? (r > b ? r : b) : g > b ? g : b;
+        const mn = r < g ? (r < b ? r : b) : g < b ? g : b;
+        const sat = mx === 0 ? 0 : (mx - mn) / mx;
+        s += sat;
+      }
+
+      const meanL = l / px;
+      const meanS = s / px;
+      const varL = l2 / px - meanL * meanL;
+      const stdL = Math.sqrt(Math.max(0, varL));
+
+      sumL += meanL;
+      sumStd += stdL;
+      sumS += meanS;
+      frames += 1;
+    };
+
+    for (let i = 0; i < samples; i++) {
+      await takeOne();
+    }
+
+    if (!frames) return { meanL: 128, stdL: 70, meanS: 0.35 };
+
+    return {
+      meanL: sumL / frames,
+      stdL: sumStd / frames,
+      meanS: sumS / frames
+    };
+  }
+
+  function suggestFromMetrics({ meanL, stdL, meanS }) {
+    const targetL = 132;
+    const targetStd = 72;
+    const targetS = 0.38;
+
+    let b = meanL ? targetL / meanL : 1.1;
+    let c = stdL ? targetStd / stdL : 1.1;
+    let s = meanS ? targetS / meanS : 1.12;
+
+    b = clampRange(b, 0.85, 1.35);
+    c = clampRange(c, 0.9, 1.35);
+    s = clampRange(s, 0.9, 1.5);
+
+    // Keep it gentle
+    const blend = (v) => 0.55 * v + 0.45 * 1;
+
+    return {
+      brightness: blend(b),
+      contrast: blend(c),
+      saturation: blend(s)
+    };
+  }
+
+  async function autoTune() {
+    const v = getVideo();
+    if (!v) {
+      toast("Auto: no <video> found on this page");
+      return;
+    }
+
+    const ready = await ensureVideoReady(v);
+    if (!ready) {
+      toast("Auto: video not ready yet (try again in a second)");
+      return;
+    }
+
+    try {
+      const m = await sampleVideoMetrics(v, 2);
+      const sug = suggestFromMetrics(m);
+
+      state.brightness = sug.brightness;
+      state.contrast = sug.contrast;
+      state.saturation = sug.saturation;
+
+      updateSlider("brightness", state.brightness);
+      updateSlider("contrast", state.contrast);
+      updateSlider("saturation", state.saturation);
+      applyEffects();
+
+      toast(
+        `Auto: B ${formatNum(state.brightness)}  C ${formatNum(
+          state.contrast
+        )}  S ${formatNum(state.saturation)}`
+      );
+    } catch (err) {
+      // Common: SecurityError when video is cross-origin and canvas is tainted
+      state.brightness = 1.1;
+      state.contrast = 1.1;
+      state.saturation = 1.15;
+
+      updateSlider("brightness", state.brightness);
+      updateSlider("contrast", state.contrast);
+      updateSlider("saturation", state.saturation);
+      applyEffects();
+
+      const msg = String(err && err.name ? err.name : err);
+      const blocked = /SecurityError|tainted|cross-origin/i.test(msg);
+      toast(
+        blocked
+          ? "Auto: site blocks pixel sampling (cross-origin). Using a gentle preset."
+          : "Auto: couldn’t sample the video. Using a gentle preset."
+      );
+    }
+  }
+
+  // --------------------------------------------------
+  // BLIND (AUTO-SHRINK ON COLLAPSE)
+  // --------------------------------------------------
 
   function blind(root) {
     const header = root.querySelector(".aive-header");
@@ -668,6 +1157,23 @@ console.log("AIVE content script loaded", location.href);
     let open = false,
       anim = false,
       timer;
+
+    function maxClipHeight() {
+      const { h: vh } = viewportSize();
+      const headerH = header.getBoundingClientRect().height || 44;
+      // Keep some padding so it never touches edges
+      return Math.max(0, vh - EDGE_PAD * 2 - headerH);
+    }
+
+    function openTarget() {
+      return Math.min(body.scrollHeight, maxClipHeight());
+    }
+
+    function setCollapsed(isCollapsed) {
+      root.classList.toggle("aive-collapsed", isCollapsed);
+      // After width changes, re-clamp
+      requestAnimationFrame(() => ensureInView());
+    }
 
     function animate(to) {
       if (anim) return;
@@ -680,7 +1186,11 @@ console.log("AIVE content script loaded", location.href);
         const p = Math.min((t - start) / animMS, 1);
         clip.style.height = from + delta * ease(p) + "px";
         if (p < 1) requestAnimationFrame(step);
-        else anim = false;
+        else {
+          anim = false;
+          // If fully closed, shrink panel bar
+          if (to === 0) setCollapsed(true);
+        }
       }
       requestAnimationFrame(step);
     }
@@ -689,7 +1199,8 @@ console.log("AIVE content script loaded", location.href);
       clearTimeout(timer);
       if (!open) {
         open = true;
-        animate(body.scrollHeight);
+        setCollapsed(false);
+        animate(openTarget());
       }
     };
 
@@ -708,13 +1219,17 @@ console.log("AIVE content script loaded", location.href);
     let dragging = false;
     let startX = 0,
       startY = 0;
-    let startLeft = 0,
-      startTop = 0;
+    let startLeft = 0;
+    let startOffset = 0; // top or bottom depending on anchor
+
+    function readOffset() {
+      return anchorMode === "bottom" ? currentBottom() : currentTop();
+    }
 
     header.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
 
-      // ✅ If user clicked the help button (or any button), do NOT start drag
+      // If user clicked any button, do NOT start drag
       if (e.target && e.target.closest && e.target.closest("button")) return;
 
       dragging = true;
@@ -722,8 +1237,8 @@ console.log("AIVE content script loaded", location.href);
 
       startX = e.clientX;
       startY = e.clientY;
-      startLeft = parseFloat(root.style.left) || root.offsetLeft || 0;
-      startTop = parseFloat(root.style.top) || root.offsetTop || 0;
+      startLeft = currentLeft();
+      startOffset = readOffset();
 
       e.preventDefault();
     });
@@ -735,11 +1250,19 @@ console.log("AIVE content script loaded", location.href);
       const dy = e.clientY - startY;
 
       const nextLeft = startLeft + dx;
-      const nextTop = startTop + dy;
 
-      const fixed = snapAndClamp(nextLeft, nextTop);
-      root.style.left = fixed.left + "px";
-      root.style.top = fixed.top + "px";
+      let nextOffset;
+      if (anchorMode === "bottom") {
+        // moving down decreases bottom distance
+        nextOffset = startOffset - dy;
+        const fixed = snapAndClamp(nextLeft, nextOffset, "bottom");
+        setPosition(fixed.left, fixed.bottom, "bottom");
+      } else {
+        // top anchor: moving down increases top
+        nextOffset = startOffset + dy;
+        const fixed = snapAndClamp(nextLeft, nextOffset, "top");
+        setPosition(fixed.left, fixed.top, "top");
+      }
     });
 
     header.addEventListener("pointerup", async (e) => {
@@ -750,14 +1273,7 @@ console.log("AIVE content script loaded", location.href);
         header.releasePointerCapture(e.pointerId);
       } catch {}
 
-      const left = parseFloat(root.style.left) || root.offsetLeft || 0;
-      const top = parseFloat(root.style.top) || root.offsetTop || 0;
-      const fixed = snapAndClamp(left, top);
-
-      root.style.left = fixed.left + "px";
-      root.style.top = fixed.top + "px";
-
-      await set({ [POS_KEY]: { left: fixed.left, top: fixed.top } });
+      await persistPosition();
     });
 
     header.addEventListener("pointercancel", () => {
@@ -773,13 +1289,50 @@ console.log("AIVE content script loaded", location.href);
     // dialogs always work, but skip panel/effects when blacklisted
     if (await isBlacklisted()) return;
 
-    const pos = await get(POS_KEY);
+    const rawPos = await get(POS_KEY);
+    posStore = normalizeSavedPos(rawPos);
+
+    const globalAnchor = (await get(ANCHOR_KEY)) || null;
+
+    // Choose anchor priority:
+    // 1) last-used per-site anchor (posStore.anchor)
+    // 2) global anchor setting
+    // 3) bottom
+    anchorMode =
+      posStore.anchor ||
+      (globalAnchor === "top" || globalAnchor === "bottom"
+        ? globalAnchor
+        : "bottom");
 
     const wait = () => {
       if (!ALIVE) return;
-      if (document.body) createPanel(pos);
-      else requestAnimationFrame(wait);
+      if (!document.body) return requestAnimationFrame(wait);
+
+      createPanel();
+
+      applySavedPosition();
+
+      // Set anchor button label
+      const b = ROOT.querySelector(".aive-anchor-btn");
+      if (b) b.textContent = anchorMode === "bottom" ? "Bottom" : "Top";
+
+      wireControls();
+      blind(ROOT);
+      enableDragSnap(ROOT);
+
+      // clamp on resize / zoom changes
+      window.addEventListener("resize", ensureInView, { passive: true });
+      window.visualViewport?.addEventListener?.("resize", ensureInView, {
+        passive: true
+      });
+
+      // Persist normalized format (so old installs migrate quietly)
+      set({ [POS_KEY]: posStore, [ANCHOR_KEY]: anchorMode });
+
+      // If video exists, apply defaults (no-op if none)
+      applyEffects();
     };
+
     wait();
   })();
 })();
