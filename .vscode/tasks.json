@@ -23,6 +23,24 @@
       "problemMatcher": []
     },
     {
+      "label": "AIVE: Git Pull (rebase) then Push",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "cd \"${workspaceFolder}\"; git pull --rebase; if ($LASTEXITCODE -ne 0) { exit 1 }; git push; if ($LASTEXITCODE -ne 0) { exit 1 }"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "AIVE: Replace from GitHub (preserve .vscode)",
       "type": "shell",
       "command": "powershell",
