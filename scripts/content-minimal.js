@@ -472,6 +472,7 @@ console.log("AIVE content script loaded", location.href);
     brightness: 1,
     contrast: 1,
     saturation: 1,
+    hue: 0,
     sepia: 0,
     zoom: 1,
     flip: false
@@ -485,6 +486,7 @@ console.log("AIVE content script loaded", location.href);
       brightness(${state.brightness})
       contrast(${state.contrast})
       saturate(${state.saturation})
+      hue-rotate(${state.hue}deg)
       sepia(${state.sepia})
     `;
 
@@ -813,6 +815,7 @@ console.log("AIVE content script loaded", location.href);
             ${slider("Brightness", "brightness", 0, 2, 0.01, 1)}
             ${slider("Contrast", "contrast", 0, 2, 0.01, 1)}
             ${slider("Saturation", "saturation", 0, 2, 0.01, 1)}
+            ${slider("Hue", "hue", -180, 180, 1, 0)}
             ${slider("Sepia", "sepia", 0, 1, 0.01, 0)}
             ${slider("Zoom", "zoom", 1, 2, 0.01, 1)}
 
@@ -1266,6 +1269,7 @@ console.log("AIVE content script loaded", location.href);
         brightness: 1,
         contrast: 1,
         saturation: 1,
+        hue: 0,
         sepia: 0,
         zoom: 1,
         flip: false
