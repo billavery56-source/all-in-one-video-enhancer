@@ -815,7 +815,7 @@ console.log("AIVE content script loaded", location.href);
             ${slider("Brightness", "brightness", 0, 2, 0.01, 1)}
             ${slider("Contrast", "contrast", 0, 2, 0.01, 1)}
             ${slider("Saturation", "saturation", 0, 2, 0.01, 1)}
-            ${slider("Hue", "hue", -180, 180, 1, 0)}
+            ${slider("Hue", "hue", 0, 360, 0.5, 0)}
             ${slider("Sepia", "sepia", 0, 1, 0.01, 0)}
             ${slider("Zoom", "zoom", 1, 2, 0.01, 1)}
 

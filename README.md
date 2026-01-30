@@ -1,6 +1,6 @@
 # All-in-One Video Enhancer (AIVE)
 
-Overlay controls for any HTML5 video: filters, zoom, mirroring, auto-tune, reset, hotkeys, sleep mode, and a per-site blacklist.
+A floating, on-page control panel for **any HTML5 video**. Tweak the picture with CSS filters (brightness/contrast/saturation/**hue**/sepia), zoom in, flip horizontally, and use **Auto** to smart-tune.
 
 ## Features
 
@@ -8,154 +8,83 @@ Overlay controls for any HTML5 video: filters, zoom, mirroring, auto-tune, reset
   - Brightness
   - Contrast
   - Saturation
-  - Hue
+  - **Hue (0–360° wrap, 0.5° steps)**
   - Sepia
   - Zoom
-- Mirroring:
-  - Horizontal (H)
-  - Vertical (V)
-- Auto-tune:
-  - Samples the current frame and adjusts brightness/contrast/saturation.
-- Reset:
-  - Returns all sliders to defaults.
-- Auto-fade:
-  - Panel gently hides when idle and reappears when you move near it.
-- Draggable panel:
-  - Grab the **AIVE** title and move the panel anywhere on screen.
+- Layout / behavior controls:
+  - **Anchor** the panel to the **Top** or **Bottom** of the viewport
+  - **Pin** to keep the panel expanded (otherwise it can auto-collapse)
+  - Tune auto-collapse feel with **Animation Speed**, **Blind Weight**, and **Collapse Delay**
+- One-click actions:
+  - **Auto**: samples the current video frame (when allowed) and adjusts the picture
+  - **Reset**: returns sliders to defaults
+  - **Flip Horizontal**: mirror the video
 - Built-in help:
-  - Blue **?** icon on the panel opens a centered help dialog explaining pinning, panel controls, and toolbar actions.
+  - Blue **?** opens a centered help dialog with quick, readable tips
 - Per-site blacklist:
-  - Uses `aive-blacklist-v1` in `chrome.storage.local`.
-  - “Disable on site” button in the panel adds the current host.
-  - A small toast on the page lets you re-enable the site.
-- Sleep mode (per tab):
-  - Temporarily disable/enable AIVE on the current tab (video styles are cleared).
+  - Disable AIVE on sites where you never want it running
 
-### Safety / Streaming
+### Notes on Auto
 
-AIVE never runs on major streaming services (for safety and to avoid layout weirdness):
-
-- `netflix.com`, `nflxvideo.net`
-- `primevideo.com`, `amazonvideo.com`
-- `disneyplus.com`
-- `hulu.com`
-- `max.com`, `hbomax.com`
-- `paramountplus.com`
-- `peacocktv.com`
-- `starz.com`
-- `showtime.com`
-- `crunchyroll.com`
-
-These hosts are hard-blocked in the content script and AIVE bails out immediately.
+Some videos can’t be sampled due to browser security rules (cross-origin / DRM). If sampling is blocked, Auto will fall back gracefully (it won’t crash the page).
 
 ## Keyboard Shortcuts
 
-Configured in `manifest.json`:
-
-- **Alt+Shift+V** – Inject/activate Video Enhancer in the current tab
-- **Alt+Shift+R** – Reset all AIVE settings on the current tab
-- **Alt+Shift+S** – Toggle sleep mode on the current tab (temporarily disable/enable AIVE)
-
-> Note: The old single-key panel shortcuts (V/H/R, etc.) are not used in this minimal version.
+- **Alt+Shift+B** — Open the **Blacklist Manager** (also configurable at `chrome://extensions/shortcuts`)
 
 ## Install (Chrome/Edge)
 
 1. Open `chrome://extensions` (Edge: `edge://extensions`).
-2. Enable **Developer mode** (top-right).
-3. Click **Load unpacked** and select this folder.
-4. Click the puzzle-piece (Extensions) icon and **pin** “All-in-One Video Enhancer (AIVE)” so the toolbar button is always visible.
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and select the `all-in-one-video-enhancer` folder.
+4. (Optional) Pin the AIVE extension icon to your toolbar.
 
 ## Usage
 
 ### Basic
 
-1. Open a page with an HTML5 `<video>` element (e.g. a YouTube watch page).
-2. AIVE will inject automatically on navigation.
-3. If needed, use:
-   - The **toolbar popup** (AIVE icon) to pause/sleep or change site blacklist.
-   - The **Alt+Shift+V** shortcut to force-inject on the active tab.
+1. Open a page with an HTML5 `<video>` element.
+2. AIVE injects automatically (unless the site is blacklisted).
+3. Use the on-page panel to adjust the picture.
 
 ### Panel (on-page UI)
 
-- Use the sliders to adjust **brightness**, **contrast**, **saturation**, **hue**, and **zoom**.
-- Use **H** and **V** buttons to mirror horizontally / vertically.
-- Click **Auto** to let AIVE smart-tune the picture.
-- Click **Reset** to return all sliders to defaults.
-- Click and drag the **AIVE** title to move the panel around.
-- The panel auto-hides when idle and reappears when your mouse moves near it.
-- Click the blue **?** icon on the panel to open a large, centered help dialog with readable text.
+- Use sliders to adjust **brightness**, **contrast**, **saturation**, **hue**, **sepia**, and **zoom**.
+- Use **Anchor** to stick the panel to the top/bottom of your viewport.
+- Use **Flip** to mirror the video horizontally.
+- Click **Auto** to smart-tune the image.
+- Click **Reset** to return everything to defaults.
+- Drag the **AIVE** header to move the panel.
+- Use the **📌 pin** to keep the panel expanded (otherwise it may collapse when idle).
+- Click the blue **?** for the built-in help dialog.
 
-### Site Controls (toolbar popup)
+### Blacklist Manager
 
-From `popup.html` / `popup.js`:
+- Press **Alt+Shift+B** to open the blacklist dialog.
+- Add or remove domains to control where AIVE runs.
 
-- **Pause AIVE on this tab**  
-  Toggles sleep mode on the current tab (clears/restores video filters and transforms).
-- **Disable AIVE on this site**  
-  Adds the current host to the `aive-blacklist-v1` list and prevents auto-injection.
-- **Enable AIVE on this site**  
-  Removes the current host from the blacklist so AIVE can run again.
+## What AIVE Stores
 
-### “Disable on site” (panel button)
+AIVE uses `chrome.storage.local` for a few small settings:
 
-- The **“Disable on site”** button in the panel:
-  - Adds the current host to `aive-blacklist-v1`.
-  - Removes the on-page UI.
-  - Shows a small toast with an **Enable** button to quickly remove the site from the blacklist.
+- `aive_blacklist` — array of hostnames where AIVE is disabled
+- `aive_pos_<hostname>` — saved panel position for that site
+- `aive_anchor_mode` — your preferred anchor mode (top/bottom)
 
 ## Permissions
 
-- `storage`: Save settings and blacklist.
-- `tabs`: Allow the popup and background script to talk to the active tab.
-- `scripting`: Inject CSS/JS into the active tab.
-- `activeTab`: Shortcuts / context menu injection.
-- `webNavigation`: Auto-inject after navigation.
-- `host_permissions: ["<all_urls>"]`: Allow AIVE to run anywhere a video might exist (with built-in streaming exceptions).
+- `storage` — save blacklist + panel position/anchor
+- `activeTab` — talk to the currently active tab when you use the shortcut
+- `scripting` — allows MV3 scripts to interact as needed
+- `host_permissions: ["<all_urls>"]` — lets the content script run on pages with videos
 
 ## Implementation Notes
 
-- Manifest: **V3**
-- Content script: `scripts/content-minimal.js`
-- Styles injected to pages: `styles/aive/minimal.css`
-- Background service worker: `scripts/background.js`
-- Popup UI: `popup.html` + `scripts/popup.js`
-- Icons in `icons/`
+AIVE applies effects via CSS:
 
-If something fails to load, open the extension’s **Details → Inspect views** (service worker / popup / content script) and check the console for errors.
+- `filter:` brightness/contrast/saturate/**hue-rotate**/sepia
+- `transform:` scale (zoom) + optional horizontal flip
 
 ## Branding (BamaBraves)
 
-This repo includes a reusable brand mark you can use across all your extensions:
-
-- Master SVG: `icons/bamabraves-logo.svg` (gradient rounded-square, BB monogram, sparkle)
-- Monochrome SVG: `icons/bamabraves-logo-mono.svg` (transparent background, solid glyph)
-
-To export PNG sizes commonly used by Chrome extensions and the Web Store:
-
-1. Make sure Node.js LTS is installed.
-2. In the project folder, run:
-   - `npm install`
-   - `npm run build:icons`
-
-This will create:
-
-- `icons/brand-16.png`
-- `icons/brand-32.png`
-- `icons/brand-48.png`
-- `icons/brand-128.png`
-- `icons/brand-256.png`
-- `icons/brand-512.png`
-
-The manifest is already set up to use these:
-
-```jsonc
-{
-  "icons": {
-    "16": "icons/brand-16.png",
-    "32": "icons/brand-32.png",
-    "48": "icons/brand-48.png",
-    "128": "icons/brand-128.png",
-    "256": "icons/brand-256.png",
-    "512": "icons/brand-512.png"
-  }
-}
+Icons live in `icons/` and are referenced by `manifest.json`.
