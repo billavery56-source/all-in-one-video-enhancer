@@ -1,19 +1,5 @@
 console.log("AIVE content script loaded", location.href);
 
-/*
-  AIVE – All-in-One Video Enhancer (content-minimal.js)
-
-  Quick Zoom (no panel needed):
-    Hold Z:
-      • Wheel = zoom in/out at cursor
-      • Left click = zoom in at click point
-      • Right click = zoom out at click point (context menu suppressed)
-      • Drag = pan the zoom (moves transform-origin)
-  Panel:
-    • Always clamps into viewport (fixes "no show"/offscreen)
-    • Hover header to expand unless pinned
-*/
-
 (() => {
   "use strict";
   if (window.__AIVE_LOADED__) return;
@@ -34,190 +20,13 @@ console.log("AIVE content script loaded", location.href);
 
   const DOMAIN = location.hostname;
   const POS_KEY = `aive_pos_${DOMAIN}`;
-  const ANCHOR_KEY = `aive_anchor_mode`; // global
 
   // ----------------------------
-  // Blacklist (always available)
+  // Blacklist
   // ----------------------------
-  const BL_DIALOG_ID = "aive-blacklist-dialog";
-
-  function closeDialogById(id) {
-    const el = document.getElementById(id);
-    if (el) el.remove();
-  }
-
-  function normalizeDomains(text) {
-    const lines = (text || "")
-      .split(/\r?\n/g)
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const cleaned = [];
-    const seen = new Set();
-
-    for (const line of lines) {
-      let d = line;
-      try {
-        if (/^https?:\/\//i.test(d)) d = new URL(d).hostname;
-      } catch {}
-      d = d.toLowerCase().replace(/^\.+/, "").replace(/\.+$/, "");
-      if (!d) continue;
-      if (!seen.has(d)) {
-        seen.add(d);
-        cleaned.push(d);
-      }
-    }
-    return cleaned;
-  }
-
   async function isBlacklisted() {
     const list = (await get("aive_blacklist")) || [];
     return Array.isArray(list) && list.includes(DOMAIN);
-  }
-
-  async function openBlacklistDialog() {
-    if (!document.body) return;
-
-    closeDialogById(BL_DIALOG_ID);
-
-    const ovl = document.createElement("div");
-    ovl.id = BL_DIALOG_ID;
-    ovl.tabIndex = -1;
-    ovl.style.cssText = `
-      position:fixed; inset:0; z-index:2147483647;
-      display:grid; place-items:center;
-      background: rgba(0,0,0,.58);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    `;
-
-    const card = document.createElement("div");
-    card.style.cssText = `
-      width:min(760px, 92vw);
-      max-height:min(84vh, 900px);
-      overflow:hidden;
-      border-radius:16px;
-      border:1px solid rgba(255,255,255,.14);
-      background:#0f1115;
-      color:#e9eef7;
-      box-shadow:0 18px 54px rgba(0,0,0,.65);
-    `;
-
-    const top = document.createElement("div");
-    top.style.cssText = `
-      display:flex; align-items:center; justify-content:space-between; gap:12px;
-      padding:12px 14px;
-      border-bottom:1px solid rgba(255,255,255,.10);
-      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0));
-      font-weight:900;
-    `;
-    top.innerHTML = `<div>Blacklist Manager</div>`;
-
-    const x = document.createElement("button");
-    x.type = "button";
-    x.textContent = "✕";
-    x.style.cssText = `border:none;background:transparent;color:#a7b0c0;font-weight:900;font-size:18px;cursor:pointer;padding:2px 8px;border-radius:10px;`;
-    x.onmouseenter = () => (x.style.color = "#e9eef7");
-    x.onmouseleave = () => (x.style.color = "#a7b0c0");
-    top.appendChild(x);
-
-    const body = document.createElement("div");
-    body.style.cssText = `padding:14px; display:grid; gap:10px; overflow:auto; max-height:calc(min(84vh, 900px) - 56px);`;
-
-    const list = (await get("aive_blacklist")) || [];
-    const text = Array.isArray(list) ? list.join("\n") : "";
-
-    const hint = document.createElement("div");
-    hint.style.cssText = `color:#a7b0c0; font-size:12px; line-height:1.35;`;
-    hint.innerHTML = `
-      Add domains (one per line). If you add <b>${DOMAIN}</b>, this enhancer will do nothing on this site.
-      You can paste full URLs too; it'll extract hostnames.
-    `;
-
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.spellcheck = false;
-    ta.style.cssText = `
-      width:100%;
-      min-height:260px;
-      resize:vertical;
-      border-radius:12px;
-      border:1px solid rgba(255,255,255,.14);
-      background:#0b0d11;
-      color:#e9eef7;
-      padding:10px 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size:12.5px;
-      outline:none;
-    `;
-
-    const row = document.createElement("div");
-    row.style.cssText = `display:flex; gap:10px; justify-content:flex-end; padding-top:4px; flex-wrap:wrap;`;
-
-    function btn(label, primary) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = label;
-      b.style.cssText = `
-        border-radius:12px;
-        padding:9px 12px;
-        cursor:pointer;
-        font-weight:800;
-        border:1px solid rgba(255,255,255,.14);
-        background:${primary ? "#1b6bff" : "rgba(255,255,255,.06)"};
-        color:${primary ? "#fff" : "#e9eef7"};
-      `;
-      b.onmouseenter = () => (b.style.filter = "brightness(1.08)");
-      b.onmouseleave = () => (b.style.filter = "");
-      return b;
-    }
-
-    const saveBtn = btn("Save", true);
-    const cancelBtn = btn("Close", false);
-    const addCurrentBtn = btn(`Add ${DOMAIN}`, false);
-
-    addCurrentBtn.onclick = () => {
-      const lines = normalizeDomains(ta.value);
-      if (!lines.includes(DOMAIN)) lines.push(DOMAIN);
-      ta.value = lines.join("\n");
-    };
-
-    saveBtn.onclick = async () => {
-      const cleaned = normalizeDomains(ta.value);
-      await set({ aive_blacklist: cleaned });
-      closeDialogById(BL_DIALOG_ID);
-      // If current domain is now blacklisted, remove panel immediately.
-      if (cleaned.includes(DOMAIN)) {
-        try {
-          if (ROOT) ROOT.remove();
-          ROOT = null;
-        } catch {}
-      }
-    };
-
-    cancelBtn.onclick = () => closeDialogById(BL_DIALOG_ID);
-    x.onclick = cancelBtn.onclick;
-
-    row.appendChild(addCurrentBtn);
-    row.appendChild(cancelBtn);
-    row.appendChild(saveBtn);
-
-    body.appendChild(hint);
-    body.appendChild(ta);
-    body.appendChild(row);
-
-    card.appendChild(top);
-    card.appendChild(body);
-    ovl.appendChild(card);
-
-    ovl.addEventListener("mousedown", (e) => {
-      if (e.target === ovl) closeDialogById(BL_DIALOG_ID);
-    });
-    ovl.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeDialogById(BL_DIALOG_ID);
-    });
-
-    document.body.appendChild(ovl);
-    ovl.focus();
   }
 
   // ----------------------------
@@ -231,17 +40,8 @@ console.log("AIVE content script loaded", location.href);
     const st = getComputedStyle(el);
     if (!st) return false;
     if (st.display === "none" || st.visibility === "hidden" || Number(st.opacity) === 0) return false;
-
     const r = el.getBoundingClientRect();
     if (!r || r.width <= 0 || r.height <= 0) return false;
-
-    // quick occlusion check
-    const cx = r.left + Math.min(r.width - 1, Math.max(1, r.width * 0.5));
-    const cy = r.top + Math.min(r.height - 1, Math.max(1, r.height * 0.5));
-    const topEl = document.elementFromPoint(cx, cy);
-    if (!topEl) return true;
-    if (topEl === el) return true;
-    if (topEl.closest && topEl.closest("video") === el) return true;
     return true;
   }
 
@@ -249,29 +49,27 @@ console.log("AIVE content script loaded", location.href);
 
   function isAdLikeNode(el) {
     try {
-      const id = (el && el.id) ? String(el.id) : "";
-      const cls = (el && el.className) ? String(el.className) : "";
+      const id = el?.id ? String(el.id) : "";
+      const cls = el?.className ? String(el.className) : "";
       return _AIVE_AD_RE.test(id) || _AIVE_AD_RE.test(cls);
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   function isLikelyAdVideo(v) {
     try {
-      // Walk a few ancestors; many ad videos sit inside obvious ad containers.
       let cur = v;
       for (let i = 0; i < 6 && cur; i++) {
         if (isAdLikeNode(cur)) return true;
         cur = cur.parentElement;
       }
-      // Very small videos are usually previews/ads.
       const r = v.getBoundingClientRect();
       if (r.width * r.height < 140 * 90) return true;
-      // Tiny corner "floating" ads
-      const vw = window.innerWidth || 1, vh = window.innerHeight || 1;
-      const frac = (r.width * r.height) / (vw * vh);
-      if (frac < 0.02 && (r.right < vw * 0.55 || r.left > vw * 0.45)) return true;
       return false;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   function inViewport(r) {
@@ -423,15 +221,24 @@ console.log("AIVE content script loaded", location.href);
   }
 
   // ----------------------------
-  // Quick Zoom (hold Z)
+  // Quick Zoom (hold Z) — robust against page swallowing keys
   // ----------------------------
-  const QUICK_ZOOM_HOLD_KEY = "KeyZ";
   const QUICK_ZOOM_STEP = 1.18;
   const QUICK_ZOOM_MIN = 1.0;
   const QUICK_ZOOM_MAX = 3.5;
 
-  const pressed = new Set();
-  const isQuickHeld = () => pressed.has(QUICK_ZOOM_HOLD_KEY);
+  // Instead of relying purely on a Set + keyup,
+  // we treat "Z held" as "we saw Z-down recently".
+  // This survives sites that fail to deliver keyup or block later events.
+  let zHeldUntil = 0;
+  const Z_HELD_GRACE_MS = 350; // refreshes while key repeats / keydown seen
+
+  function now() {
+    return Date.now();
+  }
+  function isQuickHeld() {
+    return now() < zHeldUntil;
+  }
 
   let dragging = false;
   let dragStart = null;
@@ -443,15 +250,28 @@ console.log("AIVE content script loaded", location.href);
     return tag === "input" || tag === "textarea" || el.isContentEditable;
   }
 
+  function isZEvent(e) {
+    // accept both key and code; some sites mess with one but not the other
+    return e.code === "KeyZ" || e.key === "z" || e.key === "Z";
+  }
+
+  function refreshZHeld() {
+    zHeldUntil = now() + Z_HELD_GRACE_MS;
+  }
+
+  function clearZHeld() {
+    zHeldUntil = 0;
+    dragging = false;
+    dragStart = null;
+    activeZoomVideo = null;
+  }
+
   function findVideoFromEvent(ev) {
     const el = document.elementFromPoint(ev.clientX, ev.clientY) || ev.target;
     let v = null;
     if (el?.tagName?.toLowerCase?.() === "video") v = el;
     else v = el?.closest?.("video") || null;
-
-    // Ignore likely ad/preview videos when selecting under the cursor.
     if (v && isLikelyAdVideo(v)) v = null;
-
     return v || activeZoomVideo || getVideo();
   }
 
@@ -470,48 +290,51 @@ console.log("AIVE content script loaded", location.href);
       zoomOrigin = { x: 50, y: 50 };
     }
     applyEffects(v);
-    if (ROOT) { try { updateSliderUI("zoom"); } catch {} }
+    if (ROOT) updateSliderUI("zoom");
   }
 
-  function clearKeys() {
-    pressed.clear();
-    dragging = false;
-    dragStart = null;
-    activeZoomVideo = null;
+  function clearKeysOnBlur() {
+    clearZHeld();
   }
 
-  window.addEventListener("blur", clearKeys, true);
+  window.addEventListener("blur", clearKeysOnBlur, true);
   document.addEventListener(
     "visibilitychange",
     () => {
-      if (document.hidden) clearKeys();
+      if (document.hidden) clearKeysOnBlur();
     },
     true
   );
 
-  window.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.code !== QUICK_ZOOM_HOLD_KEY) return;
-      if (e.repeat) return;
-      if (isTypingTarget(e.target)) return;
-      if (e.altKey || e.ctrlKey || e.metaKey) return;
-      pressed.add(e.code);
-    },
-    true
-  );
+  // Register on multiple targets, capture phase, earliest possible (document_start via manifest)
+  const KEY_TARGETS = [document, window, document.documentElement].filter(Boolean);
 
-  window.addEventListener(
-    "keyup",
-    (e) => {
-      if (e.code !== QUICK_ZOOM_HOLD_KEY) return;
-      pressed.delete(e.code);
-      dragging = false;
-      dragStart = null;
-      activeZoomVideo = null;
-    },
-    true
-  );
+  for (const tgt of KEY_TARGETS) {
+    tgt.addEventListener(
+      "keydown",
+      (e) => {
+        if (!isZEvent(e)) return;
+        if (e.repeat) {
+          // repeat still refreshes hold
+          refreshZHeld();
+          return;
+        }
+        if (isTypingTarget(e.target)) return;
+        if (e.altKey || e.ctrlKey || e.metaKey) return;
+        refreshZHeld();
+      },
+      true
+    );
+
+    tgt.addEventListener(
+      "keyup",
+      (e) => {
+        if (!isZEvent(e)) return;
+        clearZHeld();
+      },
+      true
+    );
+  }
 
   window.addEventListener(
     "mousedown",
@@ -541,7 +364,6 @@ console.log("AIVE content script loaded", location.href);
         e.preventDefault();
         e.stopPropagation();
       } else if (e.button === 2) {
-        activeZoomVideo = v;
         zoomAt(v, e, -1);
         e.preventDefault();
         e.stopPropagation();
@@ -566,7 +388,7 @@ console.log("AIVE content script loaded", location.href);
       zoomOrigin = { x: nx, y: ny };
 
       applyEffects(activeZoomVideo || v);
-      if (ROOT) { try { updateSliderUI("zoom"); } catch {} }
+      if (ROOT) updateSliderUI("zoom");
 
       e.preventDefault();
       e.stopPropagation();
@@ -615,10 +437,9 @@ console.log("AIVE content script loaded", location.href);
   );
 
   // ----------------------------
-  // Panel UI (always on-screen)
+  // Panel UI + AUTO-ANCHOR (top if dropped top-half, bottom if dropped bottom-half)
   // ----------------------------
   let ROOT = null;
-  let anchorMode = "bottom";
   let pinned = false;
 
   const EDGE_PAD = 8;
@@ -651,7 +472,7 @@ console.log("AIVE content script loaded", location.href);
     root.style.cssText = `
       position: fixed;
       left: ${EDGE_PAD}px;
-      bottom: ${EDGE_PAD}px;
+      top: ${EDGE_PAD}px;
       width: 320px;
       z-index: 2147483646;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
@@ -693,50 +514,26 @@ console.log("AIVE content script loaded", location.href);
         display:grid;
         gap:10px;
       }
-      #aive-root .aive-row{
-        display:grid;
-        gap:6px;
-      }
+      #aive-root .aive-row{display:grid; gap:6px;}
       #aive-root label{
-        display:flex;
-        align-items:baseline;
-        justify-content:space-between;
-        gap:10px;
-        font-size: 12px;
-        color:#cdd5e3;
-        font-weight: 800;
+        display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+        font-size: 12px; color:#cdd5e3; font-weight: 800;
       }
-      #aive-root .aive-val{
-        color:#f0e890;
-        font-weight: 900;
-      }
-      #aive-root input[type="range"]{
-        width:100%;
-        accent-color: #f0a060;
-      }
-      #aive-root .aive-buttons{
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
-      }
-      #aive-root .aive-buttons button{
-        flex:1 1 auto;
-      }
+      #aive-root .aive-val{color:#f0e890;font-weight: 900;}
+      #aive-root input[type="range"]{width:100%; accent-color: #f0a060;}
+      #aive-root .aive-buttons{display:flex; gap:8px; flex-wrap:wrap;}
+      #aive-root .aive-buttons button{flex:1 1 auto;}
       #aive-root .aive-collapsed .aive-body{display:none;}
     `;
-
     root.appendChild(style);
 
     const card = document.createElement("div");
     card.className = "aive-card aive-collapsed";
-
     card.innerHTML = `
       <div class="aive-header">
         <div class="aive-title">AIVE</div>
         <div class="aive-hbtns">
           <button class="aive-pin" type="button" title="Pin (disable hover collapse)">📌</button>
-          <button class="aive-anchor" type="button" title="Toggle anchor">Bottom</button>
-          <button class="aive-bl" type="button" title="Blacklist">B</button>
         </div>
       </div>
 
@@ -751,16 +548,6 @@ console.log("AIVE content script loaded", location.href);
         <div class="aive-row">
           <label>Flip Horizontal <span class="aive-val">${state.flip ? "On" : "Off"}</span></label>
           <button class="aive-flip" type="button">Flip</button>
-        </div>
-
-        <div class="aive-row">
-          <label>Auto Tune <span class="aive-val aive-autotune-status">Ready</span></label>
-          <button class="aive-autotune" type="button" title="Apply a smart preset to the main video on this page">Auto</button>
-        </div>
-
-        <div class="aive-row">
-          <label>Hide Ads <span class="aive-val aive-ads-status">Off</span></label>
-          <button class="aive-ads-toggle" type="button" title="Cosmetic hide: hides common ad containers (not a full ad-blocker)">Toggle</button>
         </div>
 
         <div class="aive-buttons">
@@ -786,7 +573,6 @@ console.log("AIVE content script loaded", location.href);
     let left = parseFloat(ROOT.style.left || "0");
     let top = parseFloat(ROOT.style.top || "0");
 
-    // clamp
     left = clamp(left, vv.ox + EDGE_PAD, vv.ox + vv.w - r.width - EDGE_PAD);
     top = clamp(top, vv.oy + EDGE_PAD, vv.oy + vv.h - r.height - EDGE_PAD);
 
@@ -794,45 +580,79 @@ console.log("AIVE content script loaded", location.href);
     ROOT.style.top = `${top}px`;
   }
 
-  function snapToEdges(x, y, anchor) {
+  function snapToEdges(x, y) {
     const vv = viewportSize();
     const r = ROOT.getBoundingClientRect();
 
     let left = x;
     let top = y;
 
-    // snap left/right
     if (Math.abs(left - (vv.ox + EDGE_PAD)) <= SNAP_PX) left = vv.ox + EDGE_PAD;
     if (Math.abs((left + r.width) - (vv.ox + vv.w - EDGE_PAD)) <= SNAP_PX) {
       left = vv.ox + vv.w - r.width - EDGE_PAD;
     }
 
-    // snap top/bottom based on anchor
-    if (anchor === "top") {
-      if (Math.abs(top - (vv.oy + EDGE_PAD)) <= SNAP_PX) top = vv.oy + EDGE_PAD;
-    } else {
-      if (Math.abs((top + r.height) - (vv.oy + vv.h - EDGE_PAD)) <= SNAP_PX) {
-        top = vv.oy + vv.h - r.height - EDGE_PAD;
-      }
+    if (Math.abs(top - (vv.oy + EDGE_PAD)) <= SNAP_PX) top = vv.oy + EDGE_PAD;
+    if (Math.abs((top + r.height) - (vv.oy + vv.h - EDGE_PAD)) <= SNAP_PX) {
+      top = vv.oy + vv.h - r.height - EDGE_PAD;
     }
 
-    // clamp
     left = clamp(left, vv.ox + EDGE_PAD, vv.ox + vv.w - r.width - EDGE_PAD);
     top = clamp(top, vv.oy + EDGE_PAD, vv.oy + vv.h - r.height - EDGE_PAD);
 
     return { left, top };
   }
 
-  async function persistPosition() {
-    if (!ROOT) return;
+  function inferAnchorFromPosition() {
+    const vv = viewportSize();
     const r = ROOT.getBoundingClientRect();
-    await set({
-      [POS_KEY]: {
-        left: r.left,
-        top: r.top,
-        anchor: anchorMode
+    const cy = r.top + r.height / 2;
+    const mid = vv.oy + vv.h / 2;
+    return cy < mid ? "top" : "bottom";
+  }
+
+  async function persistPositionAutoAnchor() {
+    if (!ROOT) return;
+    const vv = viewportSize();
+    const r = ROOT.getBoundingClientRect();
+    const anchor = inferAnchorFromPosition();
+
+    const data = {
+      anchor,
+      left: r.left,
+      offset:
+        anchor === "top"
+          ? (r.top - vv.oy)
+          : ((vv.oy + vv.h) - r.bottom)
+    };
+
+    await set({ [POS_KEY]: data });
+  }
+
+  function restorePosition(pos) {
+    const vv = viewportSize();
+
+    let left = vv.ox + EDGE_PAD;
+    let top = vv.oy + EDGE_PAD;
+
+    if (pos && typeof pos === "object") {
+      if (typeof pos.left === "number") left = pos.left;
+
+      const anchor = pos.anchor === "bottom" ? "bottom" : "top";
+      const offset = typeof pos.offset === "number" ? pos.offset : EDGE_PAD;
+
+      if (anchor === "top") {
+        top = vv.oy + offset;
+      } else {
+        ROOT.style.left = `${left}px`;
+        ROOT.style.top = `${vv.oy + EDGE_PAD}px`;
+        const r = ROOT.getBoundingClientRect();
+        top = (vv.oy + vv.h) - offset - r.height;
       }
-    });
+    }
+
+    ROOT.style.left = `${left}px`;
+    ROOT.style.top = `${top}px`;
   }
 
   function setCollapsed(collapsed) {
@@ -842,19 +662,23 @@ console.log("AIVE content script loaded", location.href);
     else card.classList.remove("aive-collapsed");
   }
 
+  function updateSliderUI(key) {
+    try {
+      const input = ROOT?.querySelector?.(`input[type="range"][data-key="${key}"]`);
+      if (!input) return;
+      input.value = String(state[key]);
+      const span = input.previousElementSibling?.querySelector?.(".aive-val");
+      if (span) span.textContent = formatNum(Number(state[key]));
+    } catch {}
+  }
+
   function installPanelHandlers() {
     const card = ROOT.querySelector(".aive-card");
     const header = ROOT.querySelector(".aive-header");
     const pinBtn = ROOT.querySelector(".aive-pin");
-    const anchorBtn = ROOT.querySelector(".aive-anchor");
-    const blBtn = ROOT.querySelector(".aive-bl");
 
     let draggingPanel = false;
     let dragOff = { x: 0, y: 0 };
-
-    function setAnchorLabel() {
-      anchorBtn.textContent = anchorMode === "top" ? "Top" : "Bottom";
-    }
 
     function onEnter() {
       if (!pinned) setCollapsed(false);
@@ -871,32 +695,8 @@ console.log("AIVE content script loaded", location.href);
       pinBtn.style.filter = pinned ? "brightness(1.2)" : "";
       if (pinned) setCollapsed(false);
       else setCollapsed(true);
-      await persistPosition();
+      await persistPositionAutoAnchor();
     };
-
-    anchorBtn.onclick = async () => {
-      anchorMode = anchorMode === "top" ? "bottom" : "top";
-      await set({ [ANCHOR_KEY]: anchorMode });
-      setAnchorLabel();
-      ensureInViewHard();
-      await persistPosition();
-    };
-
-    blBtn.onclick = () => openBlacklistDialog();
-
-    function updateSliderUI(key) {
-      try {
-        const input = ROOT.querySelector(`input[type="range"][data-key="${key}"]`);
-        if (!input) return;
-        input.value = String(state[key]);
-        const span = input.previousElementSibling?.querySelector?.(".aive-val");
-        if (span) span.textContent = formatNum(Number(state[key]));
-      } catch {}
-    }
-
-    function updateAllSliders(keys) {
-      for (const k of keys) updateSliderUI(k);
-    }
 
     ROOT.querySelectorAll('input[type="range"]').forEach((r) => {
       r.addEventListener("input", () => {
@@ -922,17 +722,12 @@ console.log("AIVE content script loaded", location.href);
       state.zoom = 1;
       state.flip = false;
       zoomOrigin = { x: 50, y: 50 };
-
-      updateAllSliders(["brightness", "contrast", "saturation", "hue", "sepia", "zoom"]);
-      const flipVal = ROOT.querySelector(".aive-row .aive-val");
-      if (flipVal) flipVal.textContent = "Off";
+      ["brightness", "contrast", "saturation", "hue", "sepia", "zoom"].forEach(updateSliderUI);
       applyEffects();
     };
 
     ROOT.querySelector(".aive-hide").onclick = () => {
-      try {
-        ROOT.remove();
-      } catch {}
+      try { ROOT.remove(); } catch {}
       ROOT = null;
     };
 
@@ -945,73 +740,6 @@ console.log("AIVE content script loaded", location.href);
       applyEffects();
     };
 
-    const autoStatus = ROOT.querySelector(".aive-autotune-status");
-    const adsStatus = ROOT.querySelector(".aive-ads-status");
-
-    async function autoTune() {
-      const v = getVideo();
-      if (!v) { if (autoStatus) autoStatus.textContent = "No video"; return; }
-
-      // "Smart" preset (works everywhere, no cross-origin pixel sampling).
-      // Meant to be a safe enhancement, not a heavy-handed filter.
-      state.brightness = 1.03;
-      state.contrast = 1.10;
-      state.saturation = 1.08;
-      state.hue = 0;
-      state.sepia = 0;
-      // leave zoom/flip alone
-
-      updateAllSliders(["brightness", "contrast", "saturation", "hue", "sepia"]);
-      applyEffects(v);
-      if (autoStatus) {
-        autoStatus.textContent = "Applied";
-        setTimeout(() => { try { autoStatus.textContent = "Ready"; } catch {} }, 900);
-      }
-    }
-
-    const ADS_KEY = `aive_hide_ads_${DOMAIN}`;
-    function setAdsEnabled(enabled) {
-      const id = "aive-hide-ads-style";
-      let s = document.getElementById(id);
-      if (enabled && !s) {
-        s = document.createElement("style");
-        s.id = id;
-        // Cosmetic hide only (not a network blocker)
-        s.textContent = `
-          [id*="ad"], [class*="ad"], [class*="ads"], [id*="ads"],
-          [class*="Ad"], [id*="Ad"],
-          [class*="sponsor"], [id*="sponsor"],
-          [class*="promo"], [id*="promo"],
-          [class*="banner"], [id*="banner"],
-          [class*="outbrain"], [id*="outbrain"],
-          [class*="taboola"], [id*="taboola"]{
-            display:none !important;
-            visibility:hidden !important;
-          }
-        `;
-        document.documentElement.appendChild(s);
-      } else if (!enabled && s) {
-        s.remove();
-      }
-    }
-
-    async function refreshAdsUI() {
-      const enabled = !!(await get(ADS_KEY));
-      setAdsEnabled(enabled);
-      if (adsStatus) adsStatus.textContent = enabled ? "On" : "Off";
-    }
-
-    ROOT.querySelector(".aive-autotune").onclick = autoTune;
-
-    ROOT.querySelector(".aive-ads-toggle").onclick = async () => {
-      const cur = !!(await get(ADS_KEY));
-      await set({ [ADS_KEY]: !cur });
-      await refreshAdsUI();
-    };
-
-    refreshAdsUI();
-
-    // Drag panel
     header.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       draggingPanel = true;
@@ -1023,7 +751,7 @@ console.log("AIVE content script loaded", location.href);
 
     header.addEventListener("pointermove", (e) => {
       if (!draggingPanel) return;
-      const fixed = snapToEdges(e.clientX - dragOff.x, e.clientY - dragOff.y, anchorMode);
+      const fixed = snapToEdges(e.clientX - dragOff.x, e.clientY - dragOff.y);
       ROOT.style.left = `${fixed.left}px`;
       ROOT.style.top = `${fixed.top}px`;
       e.preventDefault();
@@ -1034,41 +762,30 @@ console.log("AIVE content script loaded", location.href);
       draggingPanel = false;
       try { header.releasePointerCapture(e.pointerId); } catch {}
       ensureInViewHard();
-      await persistPosition();
+      await persistPositionAutoAnchor();
     });
 
     header.addEventListener("pointercancel", () => { draggingPanel = false; });
-
-    setAnchorLabel();
   }
 
-  function restorePosition(pos) {
-    const vv = viewportSize();
-    let left = vv.ox + EDGE_PAD;
-    let top = vv.oy + EDGE_PAD;
-
-    if (pos && typeof pos === "object") {
-      if (typeof pos.left === "number") left = pos.left;
-      if (typeof pos.top === "number") top = pos.top;
-      if (pos.anchor === "top" || pos.anchor === "bottom") anchorMode = pos.anchor;
-    }
-
-    ROOT.style.left = `${left}px`;
-    ROOT.style.top = `${top}px`;
+  async function restoreAndClampFromStorage() {
+    if (!ROOT) return;
+    const pos = await get(POS_KEY);
+    restorePosition(pos);
+    ensureInViewHard();
   }
 
-  // keep panel in view on resize/viewport changes
-  window.addEventListener("resize", () => ensureInViewHard(), true);
+  window.addEventListener("resize", () => {
+    restoreAndClampFromStorage();
+  }, true);
+
   if (window.visualViewport) {
-    window.visualViewport.addEventListener("resize", ensureInViewHard, true);
+    window.visualViewport.addEventListener("resize", () => restoreAndClampFromStorage(), true);
     window.visualViewport.addEventListener("scroll", ensureInViewHard, true);
   }
 
   (async () => {
     if (await isBlacklisted()) return;
-
-    const globalAnchor = (await get(ANCHOR_KEY)) || null;
-    if (globalAnchor === "top" || globalAnchor === "bottom") anchorMode = globalAnchor;
 
     const pos = await get(POS_KEY);
 
@@ -1078,10 +795,8 @@ console.log("AIVE content script loaded", location.href);
     ensureInViewHard();
     installPanelHandlers();
 
-    // Apply once on load
     applyEffects();
 
-    // Re-apply when videos change a bit (lazy interval)
     setInterval(() => {
       try { applyEffects(); } catch {}
     }, 900);

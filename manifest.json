@@ -2,21 +2,13 @@
   "manifest_version": 3,
   "name": "All-in-One Video Enhancer (AIVE)",
   "version": "1.0.0",
-  "description": "Video brightness/contrast/saturation/hue/sepia/zoom/flip + quick zoom (hold Z) with drag-to-pan.",
-  "permissions": [
-    "storage"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "description": "Video filters + reliable quick-zoom (hold Z) on any HTML5 video.",
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "scripts/content-minimal.js"
-      ],
+      "matches": ["<all_urls>"],
+      "js": ["scripts/content-minimal.js"],
       "run_at": "document_start",
       "all_frames": true
     }
