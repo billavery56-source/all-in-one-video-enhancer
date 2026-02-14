@@ -672,60 +672,64 @@ console.log("AIVE content script loaded", location.href);
     true
   );
 
-  window.addEventListener(
-    "mousedown",
-    (e) => {
-      if (!quickHeld) return;
-      if (isTypingTarget(e.target)) return;
+// --- QUICK ZOOM (HOLD Z) key handling: stop "zzzz" from typing into inputs/pages ---
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.code !== QUICK_ZOOM_HOLD_KEY) return;
 
-      const v = findVideoFromEvent(e);
-      if (!v) return;
-      if (!insideVideo(v, e)) return;
+    // If user is typing in an input/textarea/contenteditable, do NOT hijack Z
+    if (isTypingTarget(e.target)) return;
 
-      if (e.button === 0) {
-        zoomAt(v, e, +1);
+    // Don’t trigger when using ctrl/alt/meta combos
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
 
-        zoomDragging = true;
-        const rect = v.getBoundingClientRect();
-        dragStart = {
-          x: e.clientX,
-          y: e.clientY,
-          ox: zoomOrigin.x,
-          oy: zoomOrigin.y,
-          vw: rect.width,
-          vh: rect.height
-        };
+    // IMPORTANT: stop the 'z' character from going into the page
+    e.preventDefault();
+    e.stopPropagation();
 
-        e.preventDefault();
-        e.stopPropagation();
-      } else if (e.button === 2) {
-        zoomAt(v, e, -1);
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    },
-    true
-  );
+    // No repeats
+    if (e.repeat) return;
 
-  window.addEventListener(
-    "mousemove",
-    (e) => {
-      if (!quickHeld || !zoomDragging || !dragStart) return;
+    quickHeld = true;
+  },
+  true // capture
+);
 
-      const dx = e.clientX - dragStart.x;
-      const dy = e.clientY - dragStart.y;
 
-      const nx = clamp(dragStart.ox - (dx / Math.max(1, dragStart.vw)) * 100, 0, 100);
-      const ny = clamp(dragStart.oy - (dy / Math.max(1, dragStart.vh)) * 100, 0, 100);
-      zoomOrigin = { x: nx, y: ny };
+window.addEventListener(
+  "keyup",
+  (e) => {
+    if (e.code !== QUICK_ZOOM_HOLD_KEY) return;
 
-      if (state.zoom > 1.0001) applyEffects();
+    // If user is typing, let it be
+    if (isTypingTarget(e.target)) return;
 
-      e.preventDefault();
-      e.stopPropagation();
-    },
-    true
-  );
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+
+    // IMPORTANT: stop the 'z' character from going into the page
+    e.preventDefault();
+    e.stopPropagation();
+
+    quickHeld = false;
+    zoomDragging = false;
+    dragStart = null;
+  },
+  true // capture
+);
+
+window.addEventListener(
+  "keypress",
+  (e) => {
+    if (!quickHeld) return;
+    if (e.code !== QUICK_ZOOM_HOLD_KEY && e.key?.toLowerCase?.() !== "z") return;
+    if (isTypingTarget(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+  },
+  true
+);
+
 
   window.addEventListener(
     "mouseup",
