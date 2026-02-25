@@ -3,18 +3,12 @@ console.log("AIVE content script loaded", location.href);
 /*
   AIVE – All-in-One Video Enhancer (content-minimal.js)
 
-  What this build includes (matches your SS1 feature set):
-  - Panel UI with: Brightness, Contrast, Saturation, Hue, Sepia, Sharpen, Zoom, Flip
-  - Buttons: Pin, Anchor (Top/Bottom), Blacklist (B), Close (X)
-  - Bottom buttons: Auto, Reset, Hide Tab
-  - Blacklist manager overlay:
-      • Click "B" on the panel OR press Alt+Shift+B
-      • Add/Remove current site buttons included
-  - Quick Zoom (hold Z):
-      • Wheel = zoom in/out at cursor
-      • Left click = zoom in at click point
-      • Right click = zoom out at click point (context menu suppressed)
-      • Drag = pan the zoom (moves transform-origin)
+  Full SS1 panel + compact layout:
+  - Full height when open
+  - Collapses the WHOLE panel to header height when mouse leaves (unless pinned)
+  - Collapsed header docks to TOP/BOTTOM based on:
+      • Edge proximity (near top/bottom), otherwise
+      • Anchor button (Top/Bottom)
 */
 
 (() => {
@@ -26,459 +20,48 @@ console.log("AIVE content script loaded", location.href);
   window.addEventListener("pagehide", () => (ALIVE = false), { once: true });
   window.addEventListener("beforeunload", () => (ALIVE = false), { once: true });
 
-  // ======================================================
-  // STORAGE
-  // ======================================================
   const STORE =
-    typeof chrome !== "undefined" && chrome.storage && chrome.storage.local
+    typeof chrome !== "undefined" &&
+    chrome.storage &&
+    chrome.storage.local &&
+    typeof chrome.storage.local.get === "function"
       ? chrome.storage.local
       : null;
 
-  const get = (key) =>
-    new Promise((r) => (STORE ? STORE.get(key, (o) => r(o[key])) : r(undefined)));
-
-  const set = (obj) => new Promise((r) => (STORE ? STORE.set(obj, r) : r()));
-
-  const DOMAIN = location.hostname;
-  const POS_KEY = `aive_pos_${DOMAIN}`;
-  const ANCHOR_KEY = `aive_anchor_mode`; // global
-  const VIDEO_PREF_KEY = `aive_video_pref_${DOMAIN}`; // per-domain
-
-  // ======================================================
-  // UTILS
-  // ======================================================
-  function clamp(n, a, b) {
-    return Math.max(a, Math.min(b, n));
-  }
-
-  function isTypingTarget(el) {
-    if (!el) return false;
-    const tag = (el.tagName || "").toLowerCase();
-    return tag === "input" || tag === "textarea" || el.isContentEditable;
-  }
-
-  function formatNum(n) {
-    return Number.isFinite(n) ? (Math.round(n * 100) / 100).toFixed(2) : String(n);
-  }
-
-  // ======================================================
-  // BLACKLIST DIALOG (WORKS EVEN IF BLACKLISTED)
-  // ======================================================
-  const BL_DIALOG_ID = "aive-blacklist-dialog";
-
-  function closeDialogById(id) {
-    const el = document.getElementById(id);
-    if (el) el.remove();
-  }
-
-  function normalizeDomains(text) {
-    const lines = (text || "")
-      .split(/\r?\n/g)
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const cleaned = [];
-    const seen = new Set();
-
-    for (const line of lines) {
-      let d = line;
+  const get = (keys) =>
+    new Promise((resolve) => {
+      if (!STORE) return resolve({});
       try {
-        if (/^https?:\/\//i.test(d)) d = new URL(d).hostname;
-      } catch {}
-      d = d.toLowerCase().replace(/^\.+/, "").replace(/\.+$/, "");
-      if (!d) continue;
-      if (!seen.has(d)) {
-        seen.add(d);
-        cleaned.push(d);
+        STORE.get(keys, (res) => resolve(res || {}));
+      } catch {
+        resolve({});
       }
-    }
-    return cleaned;
-  }
+    });
 
-  async function isBlacklisted() {
-    const list = (await get("aive_blacklist")) || [];
-    return Array.isArray(list) && list.includes(DOMAIN);
-  }
+  const set = (obj) =>
+    new Promise((resolve) => {
+      if (!STORE) return resolve();
+      try {
+        STORE.set(obj, () => resolve());
+      } catch {
+        resolve();
+      }
+    });
 
-  // ======================================================
-  // TOAST (small notifications)
-  // ======================================================
+  const EDGE = 8;
+
+  const POS_KEY = "__aive_panel_pos__";
+  const PIN_KEY = "__aive_panel_pinned__";
+  const OPEN_KEY = "__aive_panel_open__";
+  const ANCHOR_KEY = "__aive_panel_anchor__";
+  const BL_KEY = "__aive_blacklist__";
+  const DISABLED_KEY = "__aive_disabled_hosts__";
+
   let ROOT = null;
-  let TOAST_TIMER = 0;
+  let open = true; // true = expanded, false = collapsed
+  let pinned = false;
+  let anchorMode = "bottom"; // "top" | "bottom"
 
-  function toast(text, ms = 1800) {
-    try {
-      if (!document.body) return;
-      let el = document.getElementById("aive-toast");
-      if (!el) {
-        el = document.createElement("div");
-        el.id = "aive-toast";
-        el.style.cssText = `
-          position: fixed;
-          z-index: 2147483647;
-          max-width: min(420px, 92vw);
-          background: rgba(15,17,21,0.92);
-          color: #e9eef7;
-          border: 1px solid rgba(255,255,255,0.14);
-          border-radius: 12px;
-          padding: 10px 12px;
-          font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-          box-shadow: 0 12px 34px rgba(0,0,0,0.55);
-          pointer-events: none;
-          opacity: 0;
-          transition: opacity 160ms ease;
-        `;
-        document.body.appendChild(el);
-      }
-      el.textContent = String(text ?? "");
-      el.style.opacity = "1";
-
-      const margin = 10;
-      let left = margin;
-      let top = margin;
-
-      if (ROOT && ROOT.isConnected) {
-        const rect = ROOT.getBoundingClientRect();
-        left = clamp(
-          rect.left,
-          margin,
-          Math.max(margin, window.innerWidth - el.offsetWidth - margin)
-        );
-        top = clamp(rect.bottom + margin, margin, window.innerHeight - margin);
-      }
-
-      el.style.left = left + "px";
-      el.style.top = top + "px";
-      el.style.bottom = "auto";
-
-      clearTimeout(TOAST_TIMER);
-      TOAST_TIMER = setTimeout(() => {
-        if (el) el.style.opacity = "0";
-      }, ms);
-    } catch {}
-  }
-
-  async function openBlacklistDialog() {
-    if (!document.body) return;
-
-    closeDialogById(BL_DIALOG_ID);
-
-    const ovl = document.createElement("div");
-    ovl.id = BL_DIALOG_ID;
-    ovl.tabIndex = -1;
-    ovl.style.cssText = `
-      position: fixed;
-      inset: 0;
-      z-index: 2147483647;
-      display: grid;
-      place-items: center;
-      background: rgba(0,0,0,0.58);
-      pointer-events: auto;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    `;
-
-    const card = document.createElement("div");
-    card.setAttribute("role", "dialog");
-    card.setAttribute("aria-modal", "true");
-    card.style.cssText = `
-      width: min(760px, 92vw);
-      max-height: min(84vh, 900px);
-      overflow: hidden;
-      border-radius: 16px;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: #0f1115;
-      color: #e9eef7;
-      box-shadow: 0 18px 54px rgba(0,0,0,0.65);
-    `;
-
-    const top = document.createElement("div");
-    top.style.cssText = `
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 12px 14px;
-      border-bottom: 1px solid rgba(255,255,255,0.10);
-      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0));
-      font-weight: 900;
-      letter-spacing: 0.2px;
-    `;
-
-    const title = document.createElement("div");
-    title.textContent = "Blacklist Manager";
-
-    const x = document.createElement("button");
-    x.type = "button";
-    x.textContent = "✕";
-    x.title = "Close";
-    x.style.cssText = `
-      border: none;
-      background: transparent;
-      color: #a7b0c0;
-      font-weight: 900;
-      font-size: 18px;
-      cursor: pointer;
-      padding: 2px 8px;
-      border-radius: 10px;
-    `;
-    x.addEventListener("mouseenter", () => (x.style.color = "#e9eef7"));
-    x.addEventListener("mouseleave", () => (x.style.color = "#a7b0c0"));
-    top.append(title, x);
-
-    const body = document.createElement("div");
-    body.style.cssText = `
-      padding: 14px;
-      display: grid;
-      gap: 10px;
-      overflow: auto;
-      max-height: calc(min(84vh, 900px) - 56px);
-    `;
-
-    const list = (await get("aive_blacklist")) || [];
-    const text = Array.isArray(list) ? list.join("\n") : "";
-
-    const hint = document.createElement("div");
-    hint.textContent =
-      "One domain per line. You can paste full URLs too — AIVE will extract the hostname.";
-    hint.style.cssText = "color:#a7b0c0;font-size:12px;line-height:1.4;";
-
-    const ta = document.createElement("textarea");
-    ta.spellcheck = false;
-    ta.value = text;
-    ta.placeholder = "youtube.com\nexample.com";
-    ta.style.cssText = `
-      width: 100%;
-      min-height: 240px;
-      max-height: 44vh;
-      resize: vertical;
-      background: #10131a;
-      border: 1px solid rgba(255,255,255,0.14);
-      border-radius: 12px;
-      padding: 10px;
-      color: #e9eef7;
-      outline: none;
-      font-size: 13px;
-      line-height: 1.35;
-    `;
-
-    const btnRow = document.createElement("div");
-    btnRow.style.cssText = `
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr 1fr;
-      gap: 8px;
-      margin-top: 2px;
-    `;
-
-    function mkBtn(label, kind = "normal") {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = label;
-      b.style.cssText = `
-        border: 1px solid rgba(255,255,255,0.14);
-        background: ${kind === "secondary" ? "transparent" : kind === "danger" ? "#7a2b2b" : "#2a3140"};
-        color: #e9eef7;
-        border-radius: 12px;
-        padding: 10px 10px;
-        font-weight: 850;
-        cursor: pointer;
-      `;
-      return b;
-    }
-
-    const saveBtn = mkBtn("Save");
-    const cancelBtn = mkBtn("Cancel", "secondary");
-    const addBtn = mkBtn("Add This Site");
-    const removeBtn = mkBtn("Remove This Site", "danger");
-
-    function close() {
-      ovl.remove();
-    }
-
-    x.onclick = close;
-    cancelBtn.onclick = close;
-
-    ovl.addEventListener("click", (e) => {
-      if (e.target === ovl) close();
-    });
-
-    ovl.addEventListener(
-      "keydown",
-      (e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          close();
-        }
-      },
-      true
-    );
-
-    addBtn.onclick = () => {
-      const domains = normalizeDomains(ta.value);
-      const d = DOMAIN.toLowerCase();
-      if (!domains.includes(d)) domains.push(d);
-      ta.value = domains.join("\n");
-      ta.focus();
-    };
-
-    removeBtn.onclick = () => {
-      const d = DOMAIN.toLowerCase();
-      const domains = normalizeDomains(ta.value).filter((x) => x !== d);
-      ta.value = domains.join("\n");
-      ta.focus();
-    };
-
-    saveBtn.onclick = async () => {
-      const domains = normalizeDomains(ta.value);
-      await set({ aive_blacklist: domains });
-      close();
-      toast("Blacklist saved");
-    };
-
-    btnRow.append(saveBtn, cancelBtn, addBtn, removeBtn);
-
-    const current = document.createElement("div");
-    current.textContent = `Current site: ${DOMAIN}`;
-    current.style.cssText = "color:#a7b0c0;font-size:12px;";
-
-    body.append(hint, ta, btnRow, current);
-    card.append(top, body);
-    ovl.append(card);
-    document.body.appendChild(ovl);
-
-    ta.focus();
-    ta.setSelectionRange(ta.value.length, ta.value.length);
-  }
-
-  // Listen for SW message (if you wire a command in the extension)
-  if (chrome?.runtime?.onMessage) {
-    chrome.runtime.onMessage.addListener((msg) => {
-      if (msg && msg.type === "AIVE_OPEN_BLACKLIST_DIALOG") openBlacklistDialog();
-    });
-  }
-
-  // Fallback hotkey (works without chrome://extensions/shortcuts)
-  window.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.altKey && e.shiftKey && (e.key === "B" || e.key === "b")) {
-        if (isTypingTarget(e.target)) return;
-        e.preventDefault();
-        openBlacklistDialog();
-      }
-    },
-    true
-  );
-
-  // ======================================================
-  // VIDEO TARGETING
-  // ======================================================
-  let videoPref = { mode: "auto", index: 0 };
-  let _cachedCandidates = [];
-  let _cachedAt = 0;
-
-  function isActuallyVisible(el) {
-    if (!el || !el.getBoundingClientRect) return false;
-    const st = getComputedStyle(el);
-    if (!st || st.display === "none" || st.visibility === "hidden") return false;
-    if (Number(st.opacity || "1") < 0.05) return false;
-    const r = el.getBoundingClientRect();
-    return r.width >= 2 && r.height >= 2;
-  }
-
-  function inViewport(r) {
-    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
-    return r.bottom > 0 && r.right > 0 && r.left < vw && r.top < vh;
-  }
-
-  function getCandidateVideos() {
-    const now = Date.now();
-    if (now - _cachedAt < 400 && _cachedCandidates.length) return _cachedCandidates;
-
-    const vids = Array.from(document.querySelectorAll("video"));
-    const good = [];
-
-    for (const v of vids) {
-      try {
-        if (!isActuallyVisible(v)) continue;
-        if (v.closest && v.closest("#aive-root")) continue;
-        const r = v.getBoundingClientRect();
-        if (r.width < 120 || r.height < 80) continue;
-        good.push(v);
-      } catch {}
-    }
-
-    _cachedCandidates = good;
-    _cachedAt = now;
-    return good;
-  }
-
-  function scoreVideo(v) {
-    try {
-      const r = v.getBoundingClientRect();
-      const area = r.width * r.height;
-      if (!area) return -1;
-
-      let score = area;
-      if (inViewport(r)) score *= 1.15;
-
-      const playing = !v.paused && !v.ended && Number(v.currentTime || 0) > 0;
-      if (playing) score += 1_000_000_000;
-
-      if (v.controls) score += 200_000_000;
-      if (!v.muted) score += 80_000_000;
-
-      const previewish = !!(v.muted && v.loop && v.autoplay && !v.controls);
-      if (previewish) score *= 0.25;
-
-      if (v.closest && v.closest("a")) score *= 0.6;
-
-      return score;
-    } catch {
-      return -1;
-    }
-  }
-
-  function pickBestVideo(cands) {
-    let best = null;
-    let bestScore = -1;
-    for (const v of cands) {
-      const s = scoreVideo(v);
-      if (s > bestScore) {
-        bestScore = s;
-        best = v;
-      }
-    }
-    return best;
-  }
-
-  function getVideo() {
-    // Selector override (strongest)
-    if (videoPref && videoPref.mode === "selector" && videoPref.selector) {
-      try {
-        const sel = String(videoPref.selector || "").trim();
-        if (sel) {
-          const vSel = document.querySelector(sel);
-          if (vSel && vSel.tagName && vSel.tagName.toLowerCase() === "video") return vSel;
-        }
-      } catch {}
-    }
-
-    const cands = getCandidateVideos();
-    if (!cands.length) return null;
-
-    if (videoPref && videoPref.mode === "index") {
-      const idxRaw = Number(videoPref.index);
-      const idx = Math.max(0, Math.min(cands.length - 1, Number.isFinite(idxRaw) ? idxRaw : 0));
-      return cands[idx] || pickBestVideo(cands);
-    }
-
-    return pickBestVideo(cands);
-  }
-
-  // ======================================================
-  // EFFECTS
-  // ======================================================
   const state = {
     brightness: 1,
     contrast: 1,
@@ -490,374 +73,379 @@ console.log("AIVE content script loaded", location.href);
     flip: false
   };
 
-  // Zoom origin (transform-origin)
-  let zoomOrigin = { x: 50, y: 50 };
+  let vSel = null;
 
-  function setOriginFromPoint(v, clientX, clientY) {
-    const r = v.getBoundingClientRect();
-    const x = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1) * 100;
-    const y = clamp((clientY - r.top) / Math.max(1, r.height), 0, 1) * 100;
-    zoomOrigin = { x, y };
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+  function formatNum(n) {
+    if (!Number.isFinite(n)) return "0";
+    const x = Math.round(n * 100) / 100;
+    return String(x).replace(/(\.\d*[1-9])0+$|\.0+$/, "$1");
   }
 
-  // --- Sharpen filter (SVG feConvolveMatrix) ---
-  const SHARP_ID = "aive-sharpen-filter";
-  function ensureSharpenFilter() {
-    if (document.getElementById(SHARP_ID)) return;
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("id", "aive-svg-filters");
-    svg.setAttribute("width", "0");
-    svg.setAttribute("height", "0");
-    svg.style.position = "fixed";
-    svg.style.left = "-9999px";
-    svg.style.top = "-9999px";
-    svg.innerHTML = `
-      <filter id="${SHARP_ID}" x="-20%" y="-20%" width="140%" height="140%">
-        <feConvolveMatrix id="${SHARP_ID}-matrix"
-          order="3"
-          preserveAlpha="true"
-          kernelMatrix="0 0 0 0 1 0 0 0 0" />
-      </filter>
-    `;
-    document.documentElement.appendChild(svg);
+  function isEditable(el) {
+    if (!el) return false;
+    const tag = (el.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    if (el.isContentEditable) return true;
+    return false;
   }
 
-  function updateSharpenKernel(amount01) {
-    ensureSharpenFilter();
-    const m = document.getElementById(`${SHARP_ID}-matrix`);
-    if (!m) return;
-
-    const s = clamp(Number(amount01) || 0, 0, 1);
-    // 0..1 -> 0..0.35 (safe-ish range)
-    const k = 0.35 * s;
-
-    // 3x3 kernel:
-    //  0  -k  0
-    // -k  1+4k -k
-    //  0  -k  0
-    const center = 1 + 4 * k;
-    const kernel = `0 ${-k} 0 ${-k} ${center} ${-k} 0 ${-k} 0`;
-    m.setAttribute("kernelMatrix", kernel);
+  function toast(msg, ms = 900) {
+    try {
+      if (!document.body) return;
+      let el = document.getElementById("__aive_toast__");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "__aive_toast__";
+        el.style.cssText = `
+          position: fixed;
+          left: 50%;
+          top: 14px;
+          transform: translateX(-50%);
+          background: rgba(0,0,0,0.82);
+          color: #fff;
+          padding: 8px 10px;
+          border-radius: 10px;
+          font: 800 12px/1 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+          z-index: 2147483647;
+          pointer-events: none;
+          opacity: 0;
+          transition: opacity 140ms ease;
+        `;
+        document.body.appendChild(el);
+      }
+      el.textContent = msg;
+      el.style.opacity = "1";
+      clearTimeout(el.__t);
+      el.__t = setTimeout(() => (el.style.opacity = "0"), ms);
+    } catch {}
   }
 
-  // Sticky observer (some sites reset styles)
-  let _observedVideo = null;
-  let _styleObserver = null;
-  let _applyingStyles = false;
-  let _obsDebounce = 0;
+  function hostOf(url) {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return "";
+    }
+  }
 
-  function applyEffects() {
-    const v = getVideo();
-    if (!v) return;
+  async function getList(key) {
+    const res = await get([key]);
+    const arr = Array.isArray(res[key]) ? res[key] : [];
+    return arr.filter((x) => typeof x === "string" && x.trim()).map((x) => x.trim());
+  }
 
-    const filterParts = [];
+  async function setList(key, list) {
+    const clean = (Array.isArray(list) ? list : [])
+      .filter((x) => typeof x === "string" && x.trim())
+      .map((x) => x.trim());
+    await set({ [key]: clean });
+  }
 
-    if (state.sharpen > 0.001) {
-      updateSharpenKernel(state.sharpen);
-      filterParts.push(`url(#${SHARP_ID})`);
+  async function isDisabledHost() {
+    const host = hostOf(location.href);
+    if (!host) return false;
+    const list = await getList(DISABLED_KEY);
+    return list.includes(host);
+  }
+
+  async function isBlacklistedHost() {
+    const host = hostOf(location.href);
+    if (!host) return false;
+    const list = await getList(BL_KEY);
+    return list.includes(host);
+  }
+
+  // ----------------------------
+  // Video discovery / selection
+  // ----------------------------
+  let _cachedCandidates = [];
+  let _cachedAt = 0;
+
+  function getCandidateVideos() {
+    const t = now();
+    if (t - _cachedAt < 350) return _cachedCandidates;
+    _cachedAt = t;
+
+    const vids = Array.from(document.querySelectorAll("video"));
+    const good = [];
+
+    for (const v of vids) {
+      try {
+        if (!v) continue;
+        if (v.closest && v.closest("#aive-root")) continue;
+        const r = v.getBoundingClientRect();
+        if (r.width < 120 || r.height < 80) continue;
+        good.push(v);
+      } catch {}
     }
 
-    filterParts.push(
+    _cachedCandidates = good;
+    return good;
+  }
+
+  function scoreVideo(v) {
+    try {
+      const r = v.getBoundingClientRect();
+      const area = Math.max(0, r.width) * Math.max(0, r.height);
+      const visible = r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0;
+      const readyBonus = (v.readyState || 0) >= 2 ? 1 : 0;
+      const playingBonus = !v.paused ? 1 : 0;
+      return (visible ? 1e12 : 0) + area + readyBonus * 1e8 + playingBonus * 1e7;
+    } catch {
+      return -1;
+    }
+  }
+
+  function pickAutoVideo() {
+    const vids = getCandidateVideos();
+    if (!vids.length) return null;
+
+    let best = vids[0];
+    let bestScore = scoreVideo(best);
+    for (let i = 1; i < vids.length; i++) {
+      const s = scoreVideo(vids[i]);
+      if (s > bestScore) {
+        bestScore = s;
+        best = vids[i];
+      }
+    }
+    return best;
+  }
+
+  function ensureSelectedVideoStillValid() {
+    if (!vSel) return false;
+    try {
+      if (!document.contains(vSel)) return false;
+      const r = vSel.getBoundingClientRect();
+      if (r.width < 80 || r.height < 60) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function setSelectedVideo(v) {
+    vSel = v || null;
+    updateTargetStatus();
+    applyEffects();
+  }
+
+  function cycleVideo(dir) {
+    const vids = getCandidateVideos();
+    if (!vids.length) return;
+
+    if (!vSel || !vids.includes(vSel)) {
+      setSelectedVideo(pickAutoVideo() || vids[0]);
+      return;
+    }
+    const idx = vids.indexOf(vSel);
+    setSelectedVideo(vids[(idx + dir + vids.length) % vids.length]);
+  }
+
+  // ----------------------------
+  // Effects
+  // ----------------------------
+  function setOriginFromPoint(v, clientX, clientY) {
+    const r = v.getBoundingClientRect();
+    const ox = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
+    const oy = clamp((clientY - r.top) / Math.max(1, r.height), 0, 1);
+    v.style.transformOrigin = `${(ox * 100).toFixed(2)}% ${(oy * 100).toFixed(2)}%`;
+  }
+
+  function applyEffects() {
+    const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
+    if (!v) return;
+    if (!vSel) vSel = v;
+
+    const filters = [
       `brightness(${state.brightness})`,
       `contrast(${state.contrast})`,
       `saturate(${state.saturation})`,
       `hue-rotate(${state.hue}deg)`,
       `sepia(${state.sepia})`
-    );
+    ];
 
-    const filterStr = filterParts.join(" ");
-    const transformStr = `scale(${state.zoom}) scaleX(${state.flip ? -1 : 1})`;
-
-    if (v !== _observedVideo) {
-      _observedVideo = v;
-      if (_styleObserver) _styleObserver.disconnect();
-
-      _styleObserver = new MutationObserver(() => {
-        if (_applyingStyles) return;
-        clearTimeout(_obsDebounce);
-        _obsDebounce = setTimeout(() => applyEffects(), 50);
-      });
-
-      try {
-        _styleObserver.observe(v, { attributes: true, attributeFilter: ["style", "class"] });
-      } catch {}
+    const sharp = clamp(state.sharpen, 0, 1);
+    if (sharp > 0) {
+      filters.push(`contrast(${1 + sharp * 0.18})`);
+      filters.push(`drop-shadow(0 0 ${sharp * 0.6}px rgba(255,255,255,0.14))`);
     }
 
-    _applyingStyles = true;
-    v.style.filter = filterStr;
-    v.style.transform = transformStr;
+    v.style.filter = filters.join(" ");
 
-    if (state.zoom > 1.0001) v.style.transformOrigin = `${zoomOrigin.x}% ${zoomOrigin.y}%`;
-    else v.style.transformOrigin = "";
-
-    requestAnimationFrame(() => {
-      _applyingStyles = false;
-    });
+    const sx = state.flip ? -1 : 1;
+    const scale = clamp(state.zoom, 1, 3);
+    if (!v.style.transformOrigin) v.style.transformOrigin = "50% 50%";
+    v.style.transform = `scale(${scale}) scaleX(${sx})`;
+    v.style.willChange = "transform, filter";
   }
 
-  // ======================================================
-  // QUICK ZOOM (HOLD Z)
-  // ======================================================
-  const QUICK_ZOOM_HOLD_KEY = "KeyZ";
-  const QUICK_ZOOM_STEP = 1.18;
-  const QUICK_ZOOM_MIN = 1.0;
-  const QUICK_ZOOM_MAX = 3.5;
+  // ----------------------------
+  // CSS
+  // ----------------------------
+  function injectStyleOnce() {
+    if (document.getElementById("__aive_css__")) return;
+    const s = document.createElement("style");
+    s.id = "__aive_css__";
+    s.textContent = `
+#aive-root{
+  position:fixed;
+  left:${EDGE}px;
+  top:${EDGE}px;
+  width:360px;
+  z-index:2147483646;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  user-select:none;
+  pointer-events:auto;
+  transition: height 180ms ease;
+}
+#aive-root, #aive-root *{ box-sizing:border-box; }
 
-  let quickHeld = false;
-  let zoomDragging = false;
-  let dragStart = null;
+#aive-root .aive-panel{
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,0.14);
+  background:rgba(15,17,21,0.92);
+  color:#e9eef7;
+  box-shadow:0 12px 34px rgba(0,0,0,0.55);
+  backdrop-filter: blur(8px);
+}
 
-  function findVideoFromEvent(ev) {
-    const el = document.elementFromPoint(ev.clientX, ev.clientY) || ev.target;
-    if (el && el.tagName && el.tagName.toLowerCase() === "video") return el;
-    const v = el && el.closest ? el.closest("video") : null;
-    return v || getVideo();
-  }
+#aive-root .aive-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:7px 10px;
+  font-weight:900;
+  font-size:12px;
+  letter-spacing:0.2px;
+  border-bottom:1px solid rgba(255,255,255,0.10);
+  background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0));
+  cursor:grab;
+}
+#aive-root .aive-header:active{ cursor:grabbing; }
 
-  function insideVideo(v, ev) {
-    const r = v.getBoundingClientRect();
-    return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
-  }
+#aive-root .aive-header-actions{
+  display:flex;
+  align-items:center;
+  gap:7px;
+}
 
-  function updateZoomSlider() {
-    if (!ROOT) return;
-    const r = ROOT.querySelector('input[data-key="zoom"]');
-    if (!r) return;
-    r.value = String(state.zoom);
-    const span = r.previousElementSibling?.querySelector?.(".aive-val");
-    if (span) span.textContent = formatNum(state.zoom);
-  }
+#aive-root .aive-pin,
+#aive-root .aive-help,
+#aive-root .aive-anchor-btn,
+#aive-root .aive-blacklist,
+#aive-root .aive-close{
+  border:1px solid rgba(255,255,255,0.14);
+  background:rgba(255,255,255,0.06);
+  color:#e9eef7;
+  border-radius:999px;
+  padding:5px 10px;
+  font-weight:900;
+  font-size:12px;
+  cursor:pointer;
+  line-height:1;
+}
+#aive-root .aive-pin:hover,
+#aive-root .aive-help:hover,
+#aive-root .aive-anchor-btn:hover,
+#aive-root .aive-blacklist:hover,
+#aive-root .aive-close:hover{ background:rgba(255,255,255,0.10); }
+#aive-root.aive-pinned .aive-pin{ color:#ffd36a; }
 
-  function zoomAt(v, ev, dir) {
-    setOriginFromPoint(v, ev.clientX, ev.clientY);
+#aive-root .aive-body{
+  height:100%;
+  overflow:hidden;
+  padding:8px;
+  display:grid;
+  gap:6px;
+}
 
-    if (dir > 0) state.zoom = clamp(state.zoom * QUICK_ZOOM_STEP, QUICK_ZOOM_MIN, QUICK_ZOOM_MAX);
-    else state.zoom = clamp(state.zoom / QUICK_ZOOM_STEP, QUICK_ZOOM_MIN, QUICK_ZOOM_MAX);
+#aive-root .aive-row{
+  display:grid;
+  gap:4px;
+  padding:6px 6px;
+  border-radius:12px;
+  background:rgba(255,255,255,0.02);
+  border:1px solid rgba(255,255,255,0.06);
+}
 
-    if (state.zoom <= QUICK_ZOOM_MIN + 1e-6) {
-      state.zoom = 1;
-      zoomOrigin = { x: 50, y: 50 };
-    }
+#aive-root label{
+  font-size:11px;
+  font-weight:850;
+  color:rgba(233,238,247,0.92);
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  gap:8px;
+  line-height:1.1;
+}
 
-    applyEffects();
-    updateZoomSlider();
-  }
+#aive-root .aive-val{
+  font-size:9.5px;
+  font-weight:900;
+  color:rgba(233,238,247,0.72);
+  border:1px solid rgba(255,255,255,0.08);
+  background:rgba(0,0,0,0.25);
+  border-radius:999px;
+  padding:1px 6px;
+}
 
-  window.addEventListener("blur", () => {
-    quickHeld = false;
-    zoomDragging = false;
-    dragStart = null;
-  });
+#aive-root input[type="range"]{
+  width:100%;
+  margin:0;
+  accent-color:#d0645a;
+}
 
-  window.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.code !== QUICK_ZOOM_HOLD_KEY) return;
-      if (e.repeat) return;
-      if (isTypingTarget(e.target)) return;
-      if (e.altKey || e.ctrlKey || e.metaKey) return;
-      quickHeld = true;
-    },
-    true
-  );
+#aive-root button{
+  border:1px solid rgba(255,255,255,0.14);
+  background:rgba(255,255,255,0.06);
+  color:#e9eef7;
+  border-radius:12px;
+  padding:7px 10px;
+  font-weight:850;
+  font-size:12px;
+  cursor:pointer;
+  line-height:1;
+}
+#aive-root button:hover{ background:rgba(255,255,255,0.10); }
+#aive-root button:active{ transform:translateY(1px); }
 
-  window.addEventListener(
-    "keyup",
-    (e) => {
-      if (e.code !== QUICK_ZOOM_HOLD_KEY) return;
-      quickHeld = false;
-      zoomDragging = false;
-      dragStart = null;
-    },
-    true
-  );
+#aive-root .aive-target-controls{
+  display:flex;
+  gap:6px;
+  align-items:center;
+  justify-content:space-between;
+}
+#aive-root .aive-target-controls .aive-target-status{
+  margin-left:auto;
+  font-size:11px;
+  font-weight:900;
+  opacity:0.9;
+}
 
-// --- QUICK ZOOM (HOLD Z) key handling: stop "zzzz" from typing into inputs/pages ---
-window.addEventListener(
-  "keydown",
-  (e) => {
-    if (e.code !== QUICK_ZOOM_HOLD_KEY) return;
+#aive-root .aive-buttons{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:6px;
+}
 
-    // If user is typing in an input/textarea/contenteditable, do NOT hijack Z
-    if (isTypingTarget(e.target)) return;
-
-    // Don’t trigger when using ctrl/alt/meta combos
-    if (e.altKey || e.ctrlKey || e.metaKey) return;
-
-    // IMPORTANT: stop the 'z' character from going into the page
-    e.preventDefault();
-    e.stopPropagation();
-
-    // No repeats
-    if (e.repeat) return;
-
-    quickHeld = true;
-  },
-  true // capture
-);
-
-
-window.addEventListener(
-  "keyup",
-  (e) => {
-    if (e.code !== QUICK_ZOOM_HOLD_KEY) return;
-
-    // If user is typing, let it be
-    if (isTypingTarget(e.target)) return;
-
-    if (e.altKey || e.ctrlKey || e.metaKey) return;
-
-    // IMPORTANT: stop the 'z' character from going into the page
-    e.preventDefault();
-    e.stopPropagation();
-
-    quickHeld = false;
-    zoomDragging = false;
-    dragStart = null;
-  },
-  true // capture
-);
-
-window.addEventListener(
-  "keypress",
-  (e) => {
-    if (!quickHeld) return;
-    if (e.code !== QUICK_ZOOM_HOLD_KEY && e.key?.toLowerCase?.() !== "z") return;
-    if (isTypingTarget(e.target)) return;
-    e.preventDefault();
-    e.stopPropagation();
-  },
-  true
-);
-
-
-  window.addEventListener(
-    "mouseup",
-    () => {
-      if (!zoomDragging) return;
-      zoomDragging = false;
-      dragStart = null;
-    },
-    true
-  );
-
-  window.addEventListener(
-    "wheel",
-    (e) => {
-      if (!quickHeld) return;
-      if (isTypingTarget(e.target)) return;
-
-      const v = findVideoFromEvent(e);
-      if (!v) return;
-      if (!insideVideo(v, e)) return;
-
-      const dir = e.deltaY < 0 ? +1 : -1;
-      zoomAt(v, e, dir);
-
-      e.preventDefault();
-      e.stopPropagation();
-    },
-    { capture: true, passive: false }
-  );
-
-  window.addEventListener(
-    "contextmenu",
-    (e) => {
-      if (!quickHeld) return;
-      const v = findVideoFromEvent(e);
-      if (!v) return;
-      if (!insideVideo(v, e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-    },
-    true
-  );
-
-  // ======================================================
-  // PANEL UI
-  // ======================================================
-  let anchorMode = "bottom";
-  let pinned = false;
-
-  const EDGE_PAD = 8;
-  const SNAP_PX = 28;
-
-  function viewportSize() {
-    const vv = window.visualViewport;
-    if (vv) return { w: vv.width, h: vv.height };
-    return { w: window.innerWidth || 1000, h: window.innerHeight || 800 };
-  }
-
-  function snapAndClamp(left, offset, anchor) {
-    const rect = ROOT.getBoundingClientRect();
-    const panelW = rect.width || 360;
-    const panelH = rect.height || 80;
-
-    const { w: vw, h: vh } = viewportSize();
-
-    left = clamp(left, EDGE_PAD, vw - panelW - EDGE_PAD);
-
-    if (anchor === "bottom") {
-      let bottom = clamp(offset, EDGE_PAD, vh - panelH - EDGE_PAD);
-
-      if (left <= SNAP_PX) left = EDGE_PAD;
-      if (bottom <= SNAP_PX) bottom = EDGE_PAD;
-
-      const distRight = vw - (left + panelW);
-      const distTop = vh - (bottom + panelH);
-
-      if (distRight <= SNAP_PX) left = vw - panelW - EDGE_PAD;
-      if (distTop <= SNAP_PX) bottom = vh - panelH - EDGE_PAD;
-
-      return { left, bottom };
-    } else {
-      let top = clamp(offset, EDGE_PAD, vh - panelH - EDGE_PAD);
-
-      if (left <= SNAP_PX) left = EDGE_PAD;
-      if (top <= SNAP_PX) top = EDGE_PAD;
-
-      const distRight = vw - (left + panelW);
-      const distBottom = vh - (top + panelH);
-
-      if (distRight <= SNAP_PX) left = vw - panelW - EDGE_PAD;
-      if (distBottom <= SNAP_PX) top = vh - panelH - EDGE_PAD;
-
-      return { left, top };
-    }
-  }
-
-  function setPosition(left, offset, anchor) {
-    const { w: vw, h: vh } = viewportSize();
-    left = clamp(left, EDGE_PAD, vw - EDGE_PAD);
-
-    ROOT.style.left = left + "px";
-    if (anchor === "bottom") {
-      ROOT.style.bottom = clamp(offset, EDGE_PAD, vh - EDGE_PAD) + "px";
-      ROOT.style.top = "auto";
-    } else {
-      ROOT.style.top = clamp(offset, EDGE_PAD, vh - EDGE_PAD) + "px";
-      ROOT.style.bottom = "auto";
-    }
-  }
-
-  function ensureInViewHard() {
-    if (!ROOT) return;
-    const rect = ROOT.getBoundingClientRect();
-    const { w: vw, h: vh } = viewportSize();
-
-    let left = rect.left;
-    if (left < EDGE_PAD) left = EDGE_PAD;
-    if (left + rect.width > vw - EDGE_PAD) left = Math.max(EDGE_PAD, vw - rect.width - EDGE_PAD);
-
-    if (anchorMode === "bottom") {
-      const bottom = Math.max(EDGE_PAD, vh - rect.bottom);
-      const fixed = snapAndClamp(left, bottom, "bottom");
-      setPosition(fixed.left, fixed.bottom, "bottom");
-    } else {
-      const top = Math.max(EDGE_PAD, rect.top);
-      const fixed = snapAndClamp(left, top, "top");
-      setPosition(fixed.left, fixed.top, "top");
-    }
+#aive-root .aive-helpbox{
+  font-size:11px;
+  line-height:1.1;
+  color:rgba(233,238,247,0.75);
+  padding-top:6px;
+  border-top:1px solid rgba(255,255,255,0.06);
+}
+    `;
+    document.documentElement.appendChild(s);
   }
 
   function slider(label, key, min, max, step, val) {
@@ -866,102 +454,398 @@ window.addEventListener(
       <div class="aive-row">
         <label>${label} <span class="aive-val">${formatNum(v)}</span></label>
         <input type="range" data-key="${key}" min="${min}" max="${max}" step="${step}" value="${v}">
-      </div>`;
+      </div>
+    `;
   }
 
-  function createPanel() {
-    ROOT = document.createElement("div");
-    ROOT.id = "aive-root";
-    ROOT.style.cssText = `
-      position: fixed;
-      z-index: 2147483646;
-      left: ${EDGE_PAD}px;
-      bottom: ${EDGE_PAD}px;
-      top: auto;
-      width: 360px;
-      user-select: none;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  // ----------------------------
+  // OPEN/COLLAPSE docking logic
+  // ----------------------------
+  function getHeaderHeight() {
+    if (!ROOT) return 44;
+    const h = ROOT.querySelector(".aive-header")?.getBoundingClientRect?.().height;
+    return Math.max(38, Math.round(h || 44));
+  }
+
+  // If you're already near an edge, collapse toward that edge.
+  // Otherwise use the anchor button (Top/Bottom).
+  function getCollapseDock() {
+    if (!ROOT) return anchorMode;
+    const r = ROOT.getBoundingClientRect();
+    const vh = window.innerHeight || 0;
+
+    const distTop = r.top;
+    const distBottom = Math.max(0, vh - r.bottom);
+
+    const SNAP_PX = 80; // "close to edge" threshold
+
+    if (distTop <= SNAP_PX && distTop <= distBottom) return "top";
+    if (distBottom <= SNAP_PX && distBottom < distTop) return "bottom";
+    return anchorMode; // user-selected
+  }
+
+  function setRootExpanded(isExpanded) {
+    if (!ROOT) return;
+
+    open = !!isExpanded;
+    const headerH = getHeaderHeight();
+
+    if (open) {
+      // Full height: stretch
+      ROOT.style.top = EDGE + "px";
+      ROOT.style.bottom = EDGE + "px";
+      ROOT.style.height = `calc(100vh - ${EDGE * 2}px)`;
+      ROOT.style.overflow = "visible";
+    } else {
+      // Collapsed: dock to the correct edge
+      const dock = getCollapseDock();
+
+      if (dock === "bottom") {
+        ROOT.style.top = "auto";
+        ROOT.style.bottom = EDGE + "px";
+      } else {
+        ROOT.style.top = EDGE + "px";
+        ROOT.style.bottom = "auto";
+      }
+
+      ROOT.style.height = headerH + "px";
+      ROOT.style.overflow = "hidden";
+    }
+
+    persistPosition();
+  }
+
+  function ensureLeftClamped() {
+    if (!ROOT) return;
+    const vw = window.innerWidth || 0;
+    let left = parseInt(ROOT.style.left || `${EDGE}`, 10);
+    if (!Number.isFinite(left)) left = EDGE;
+    const maxLeft = Math.max(EDGE, vw - ROOT.offsetWidth - EDGE);
+    ROOT.style.left = clamp(left, EDGE, maxLeft) + "px";
+  }
+
+  async function persistPosition() {
+    if (!ROOT) return;
+    const left = Math.round(ROOT.getBoundingClientRect().left);
+    await set({
+      [POS_KEY]: { left },
+      [PIN_KEY]: !!pinned,
+      [OPEN_KEY]: !!open,
+      [ANCHOR_KEY]: anchorMode
+    });
+  }
+
+  async function restorePosition() {
+    const res = await get([POS_KEY, PIN_KEY, OPEN_KEY, ANCHOR_KEY]);
+    pinned = !!res[PIN_KEY];
+    open = res[OPEN_KEY] !== undefined ? !!res[OPEN_KEY] : true;
+    anchorMode = res[ANCHOR_KEY] === "top" ? "top" : "bottom";
+
+    const pos = res[POS_KEY];
+    const left = pos && typeof pos.left === "number" ? pos.left : EDGE;
+
+    if (!ROOT) return;
+    ROOT.style.left = left + "px";
+    ensureLeftClamped();
+
+    ROOT.classList.toggle("aive-pinned", pinned);
+    const ab = ROOT.querySelector(".aive-anchor-btn");
+    if (ab) ab.textContent = anchorMode === "bottom" ? "Bottom" : "Top";
+
+    // If pinned, always expanded
+    if (pinned) setRootExpanded(true);
+    else setRootExpanded(open);
+  }
+
+  // ----------------------------
+  // Target status
+  // ----------------------------
+  function updateTargetStatus() {
+    if (!ROOT) return;
+    const status = ROOT.querySelector(".aive-target-status");
+    const pill = ROOT.querySelector(".aive-target-pill");
+    const vids = getCandidateVideos();
+    const total = vids.length;
+
+    if (!status || !pill) return;
+
+    if (!total) {
+      status.textContent = "None";
+      pill.textContent = "None";
+      return;
+    }
+
+    if (!vSel) {
+      status.textContent = `Auto (${total})`;
+      pill.textContent = `Auto (${total})`;
+      return;
+    }
+
+    const idx = vids.indexOf(vSel);
+    if (idx >= 0) {
+      status.textContent = `Sel ${idx + 1}/${total}`;
+      pill.textContent = `Sel ${idx + 1}/${total}`;
+    } else {
+      status.textContent = `Sel (${total})`;
+      pill.textContent = `Sel (${total})`;
+    }
+  }
+
+  // ----------------------------
+  // Presets
+  // ----------------------------
+  function autoTune() {
+    state.brightness = 1.02;
+    state.contrast = 1.08;
+    state.saturation = 1.06;
+    state.hue = 0;
+    state.sepia = 0;
+    state.sharpen = 0.15;
+    state.zoom = clamp(state.zoom, 1, 3);
+    applyEffects();
+    syncSlidersFromState();
+    toast("Auto");
+  }
+
+  function resetAll() {
+    state.brightness = 1;
+    state.contrast = 1;
+    state.saturation = 1;
+    state.hue = 0;
+    state.sepia = 0;
+    state.sharpen = 0;
+    state.zoom = 1;
+    state.flip = false;
+    applyEffects();
+    syncSlidersFromState();
+    toast("Reset");
+  }
+
+  function syncSlidersFromState() {
+    if (!ROOT) return;
+    for (const k of Object.keys(state)) {
+      const inp = ROOT.querySelector(`input[data-key="${k}"]`);
+      if (!inp) continue;
+      inp.value = String(state[k]);
+      const val = inp.closest(".aive-row")?.querySelector(".aive-val");
+      if (val) val.textContent = formatNum(Number(inp.value));
+    }
+    const flipVal = ROOT.querySelector(".aive-flip")?.closest(".aive-row")?.querySelector(".aive-val");
+    if (flipVal) flipVal.textContent = state.flip ? "On" : "Off";
+  }
+
+  // ----------------------------
+  // Dialogs
+  // ----------------------------
+  function openHelpDialog() {
+    if (!document.body) return;
+
+    const ovl = document.createElement("div");
+    ovl.style.cssText = `
+      position:fixed; inset:0;
+      background:rgba(0,0,0,0.55);
+      z-index:2147483647;
+      display:grid; place-items:center;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
     `;
 
-    ROOT.innerHTML = `
-      <style>
-        #aive-root .aive-panel{
-          border: 1px solid rgba(255,255,255,0.14);
-          background: rgba(15,17,21,0.92);
-          color: #e9eef7;
-          border-radius: 14px;
-          box-shadow: 0 12px 34px rgba(0,0,0,0.55);
-          overflow: hidden;
-          backdrop-filter: blur(8px);
-        }
-        #aive-root .aive-header{
-          display:flex; align-items:center; justify-content:space-between;
-          padding: 10px 10px;
-          font-weight: 900;
-          cursor: grab;
-          background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0));
-          border-bottom: 1px solid rgba(255,255,255,0.10);
-          gap: 10px;
-        }
-        #aive-root .aive-header:active{ cursor: grabbing; }
-        #aive-root .aive-title{ letter-spacing: 0.2px; }
-        #aive-root .aive-actions{ display:flex; gap:8px; }
-        #aive-root button{
-          border: 1px solid rgba(255,255,255,0.14);
-          background: rgba(255,255,255,0.06);
-          color: #e9eef7;
-          border-radius: 10px;
-          padding: 6px 10px;
-          font-weight: 850;
-          cursor: pointer;
-          line-height: 1;
-        }
-        #aive-root button:hover{ background: rgba(255,255,255,0.10); }
-        #aive-root .aive-body{
-          padding: 10px 10px;
-          display: grid;
-          gap: 10px;
-          max-height: min(70vh, 560px);
-          overflow: auto;
-        }
-        #aive-root .aive-row{ display:grid; gap:6px; }
-        #aive-root label{
-          font-size: 12px;
-          color:#a7b0c0;
-          display:flex;
-          justify-content:space-between;
-          gap: 12px;
-        }
-        #aive-root input[type=range]{ width:100%; }
-        #aive-root .aive-buttons-3{
-          display:grid;
-          grid-template-columns: 1fr 1fr 1fr;
-          gap: 8px;
-          margin-top: 2px;
-        }
-        #aive-root .aive-collapsed .aive-body{ display:none; }
-        #aive-root .aive-pill{ min-width: 68px; text-align:center; }
-      </style>
+    const card = document.createElement("div");
+    card.style.cssText = `
+      width:min(760px, 92vw);
+      max-height:min(84vh, 900px);
+      overflow:auto;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:#0f1115;
+      color:#e9eef7;
+      box-shadow:0 18px 54px rgba(0,0,0,0.65);
+      padding:12px 14px;
+    `;
 
-      <div class="aive-panel aive-collapsed">
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;">
+        <div style="font-weight:900;">AIVE Help</div>
+        <button data-x style="border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#e9eef7;border-radius:10px;padding:6px 10px;font-weight:900;cursor:pointer;">✕</button>
+      </div>
+      <div style="font-size:12px;line-height:1.25;opacity:0.92;display:grid;gap:10px;">
+        <div><b>Quick Zoom</b>: hold <b>Z</b> then use wheel/click/right-click/drag on the video.</div>
+        <div><b>Auto-collapse</b>: collapses to header when mouse leaves (unless pinned).</div>
+        <div><b>Docking</b>: collapsed header docks to top/bottom based on edge proximity or the Top/Bottom button.</div>
+      </div>
+    `;
+    ovl.appendChild(card);
+    document.body.appendChild(ovl);
+
+    const close = () => ovl.remove();
+    card.querySelector("[data-x]").onclick = close;
+    ovl.addEventListener("click", (e) => {
+      if (e.target === ovl) close();
+    });
+  }
+
+  function openBlacklistDialog() {
+    if (!document.body) return;
+    const host = hostOf(location.href);
+
+    const ovl = document.createElement("div");
+    ovl.style.cssText = `
+      position:fixed; inset:0;
+      background:rgba(0,0,0,0.55);
+      z-index:2147483647;
+      display:grid; place-items:center;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    `;
+
+    const card = document.createElement("div");
+    card.style.cssText = `
+      width:min(560px, 92vw);
+      max-height:min(84vh, 900px);
+      overflow:hidden;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:#0f1115;
+      color:#e9eef7;
+      box-shadow:0 18px 54px rgba(0,0,0,0.65);
+      display:flex; flex-direction:column;
+    `;
+
+    const top = document.createElement("div");
+    top.style.cssText = `
+      padding:10px 12px;
+      display:flex; align-items:center; justify-content:space-between;
+      border-bottom:1px solid rgba(255,255,255,0.10);
+      font-weight:900;
+    `;
+    top.innerHTML = `<span>Blacklist</span><button data-x style="border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#e9eef7;border-radius:10px;padding:6px 10px;font-weight:900;cursor:pointer;">✕</button>`;
+
+    const body = document.createElement("div");
+    body.style.cssText = `padding:12px; display:grid; gap:10px;`;
+
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = `display:flex; gap:8px; flex-wrap:wrap;`;
+    btnRow.innerHTML = `
+      <button data-add style="flex:1; min-width:180px;">Add current (${host || "unknown"})</button>
+      <button data-remove style="flex:1; min-width:180px;">Remove current</button>
+    `;
+
+    const ta = document.createElement("textarea");
+    ta.spellcheck = false;
+    ta.style.cssText = `
+      width:100%;
+      height:180px;
+      resize:vertical;
+      background:#171a21;
+      color:#e9eef7;
+      border:1px solid rgba(255,255,255,0.14);
+      border-radius:12px;
+      padding:10px;
+      font: 700 12px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    `;
+
+    const save = document.createElement("button");
+    save.textContent = "Save";
+    save.style.cssText = `width:100%;`;
+
+    for (const b of [btnRow.querySelector("[data-add]"), btnRow.querySelector("[data-remove]"), save]) {
+      if (!b) continue;
+      b.style.border = "1px solid rgba(255,255,255,0.14)";
+      b.style.background = "rgba(255,255,255,0.06)";
+      b.style.color = "#e9eef7";
+      b.style.borderRadius = "12px";
+      b.style.padding = "10px 12px";
+      b.style.fontWeight = "900";
+      b.style.cursor = "pointer";
+    }
+
+    body.appendChild(btnRow);
+    body.appendChild(ta);
+    body.appendChild(save);
+
+    card.appendChild(top);
+    card.appendChild(body);
+    ovl.appendChild(card);
+    document.body.appendChild(ovl);
+
+    const close = () => ovl.remove();
+    top.querySelector("[data-x]").onclick = close;
+    ovl.addEventListener("click", (e) => {
+      if (e.target === ovl) close();
+    });
+
+    (async () => {
+      const list = await getList(BL_KEY);
+      ta.value = list.join("\n");
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    })();
+
+    btnRow.querySelector("[data-add]").onclick = async () => {
+      if (!host) return;
+      const list = await getList(BL_KEY);
+      if (!list.includes(host)) list.push(host);
+      ta.value = list.join("\n");
+      toast("Added");
+    };
+
+    btnRow.querySelector("[data-remove]").onclick = async () => {
+      if (!host) return;
+      const list = await getList(BL_KEY);
+      ta.value = list.filter((x) => x !== host).join("\n");
+      toast("Removed");
+    };
+
+    save.onclick = async () => {
+      const lines = ta.value
+        .split(/\r?\n/g)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await setList(BL_KEY, lines);
+      toast("Saved");
+      close();
+    };
+  }
+
+  async function disableThisHost() {
+    const host = hostOf(location.href);
+    if (!host) return;
+    const list = await getList(DISABLED_KEY);
+    if (!list.includes(host)) list.push(host);
+    await setList(DISABLED_KEY, list);
+    toast("Disabled on this host");
+    removePanel();
+  }
+
+  // ----------------------------
+  // Panel HTML
+  // ----------------------------
+  function createPanel() {
+    injectStyleOnce();
+
+    ROOT = document.createElement("div");
+    ROOT.id = "aive-root";
+    if (pinned) ROOT.classList.add("aive-pinned");
+
+    ROOT.innerHTML = `
+      <div class="aive-panel">
         <div class="aive-header">
-          <div class="aive-title">AIVE</div>
-          <div class="aive-actions">
-            <button class="aive-pin aive-pill" type="button" title="Pin">📌</button>
-            <button class="aive-anchor aive-pill" type="button" title="Toggle anchor">Bottom</button>
-            <button class="aive-bl aive-pill" type="button" title="Blacklist">B</button>
-            <button class="aive-close aive-pill" type="button" title="Close">✕</button>
-          </div>
+          <span class="aive-title">AIVE</span>
+          <span class="aive-header-actions">
+            <button class="aive-pin" type="button" title="Pin (stay open)">📌</button>
+            <button class="aive-anchor-btn" type="button" title="Dock side">${anchorMode === "bottom" ? "Bottom" : "Top"}</button>
+            <button class="aive-help" type="button" title="Help">?</button>
+            <button class="aive-blacklist" type="button" title="Blacklist">B</button>
+            <button class="aive-close" type="button" title="Close">✕</button>
+          </span>
         </div>
 
         <div class="aive-body">
-          ${slider("Brightness", "brightness", 0, 2, 0.01, state.brightness)}
-          ${slider("Contrast", "contrast", 0, 2, 0.01, state.contrast)}
-          ${slider("Saturation", "saturation", 0, 2, 0.01, state.saturation)}
-          ${slider("Hue", "hue", 0, 360, 0.5, state.hue)}
-          ${slider("Sepia", "sepia", 0, 1, 0.01, state.sepia)}
-          ${slider("Sharpen", "sharpen", 0, 1, 0.01, state.sharpen)}
-          ${slider("Zoom", "zoom", 1, QUICK_ZOOM_MAX, 0.01, state.zoom)}
+          ${slider("Brightness", "brightness", 0, 2, 0.01, 1)}
+          ${slider("Contrast", "contrast", 0, 2, 0.01, 1)}
+          ${slider("Saturation", "saturation", 0, 2, 0.01, 1)}
+          ${slider("Hue", "hue", 0, 360, 0.5, 0)}
+          ${slider("Sepia", "sepia", 0, 1, 0.01, 0)}
+          ${slider("Sharpen", "sharpen", 0, 1, 0.01, 0)}
+          ${slider("Zoom", "zoom", 1, 2, 0.01, 1)}
 
           <div class="aive-row">
             <label>Flip Horizontal <span class="aive-val">${state.flip ? "On" : "Off"}</span></label>
@@ -969,24 +853,30 @@ window.addEventListener(
           </div>
 
           <div class="aive-row">
-            <label>Target Video <span class="aive-val aive-target-status">Auto</span></label>
-            <div style="display:flex; gap:8px;">
-              <button class="aive-target-prev" type="button">◀</button>
-              <button class="aive-target-auto" type="button">Auto</button>
-              <button class="aive-target-next" type="button">▶</button>
-              <button class="aive-target-sel" type="button">Sel</button>
+            <label>Target Video <span class="aive-val aive-target-pill">Auto</span></label>
+            <div class="aive-target-controls">
+              <button class="aive-target-prev" type="button" title="Previous">◀</button>
+              <button class="aive-target-auto" type="button" title="Auto">Auto</button>
+              <button class="aive-target-next" type="button" title="Next">▶</button>
+              <button class="aive-target-selector" type="button" title="Select">Sel</button>
+              <span class="aive-target-status">Auto</span>
             </div>
           </div>
 
-          <div class="aive-buttons-3">
-            <button class="aive-auto" type="button">Auto</button>
-            <button class="aive-reset" type="button">Reset</button>
-            <button class="aive-hide" type="button">Hide Tab</button>
+          <div class="aive-buttons">
+            <button class="aive-auto" type="button" title="Auto Tune">Auto</button>
+            <button class="aive-reset" type="button" title="Reset">Reset</button>
+            <button class="aive-hide" type="button" title="Hide Tab">Hide Tab</button>
           </div>
 
-          <div style="color:#a7b0c0;font-size:11px;line-height:1.35;">
+          <div class="aive-helpbox">
             Quick Zoom: hold <b>Z</b> + wheel/click/right-click/drag on video.<br>
             Blacklist: click <b>B</b> or press <b>Alt+Shift+B</b>.
+          </div>
+
+          <div class="aive-buttons" style="grid-template-columns: 1fr 1fr; margin-top:6px;">
+            <button class="aive-disable" type="button" title="Disable AIVE on this host">Disable Tab</button>
+            <button class="aive-blacklist2" type="button" title="Manage blacklist">Blacklist</button>
           </div>
         </div>
       </div>
@@ -994,400 +884,321 @@ window.addEventListener(
 
     document.body.appendChild(ROOT);
 
-    const panel = ROOT.querySelector(".aive-panel");
-    const header = ROOT.querySelector(".aive-header");
+    wirePanelEvents();
 
-    let open = false;
-
-    function setCollapsed(collapsed) {
-      panel.classList.toggle("aive-collapsed", collapsed);
-      ensureInViewHard();
-    }
-
-    header.addEventListener("mouseenter", () => {
-      if (pinned) return;
-      if (!open) {
-        open = true;
-        setCollapsed(false);
-      }
+    restorePosition().then(() => {
+      ensureLeftClamped();
+      setRootExpanded(pinned ? true : open);
+      updateTargetStatus();
+      applyEffects();
     });
+  }
 
-    panel.addEventListener("mouseleave", () => {
-      if (pinned) return;
-      if (open) {
-        open = false;
-        setCollapsed(true);
-      }
-    });
+  function removePanel() {
+    try {
+      ROOT?.remove();
+    } catch {}
+    ROOT = null;
+  }
 
-    // Drag header
-    let draggingPanel = false;
-    let startX = 0;
-    let startY = 0;
-    let startLeft = 0;
-    let startOffset = 0;
+  function wirePanelEvents() {
+    if (!ROOT) return;
 
-    const readOffset = () => {
-      const rect = ROOT.getBoundingClientRect();
-      const { h: vh } = viewportSize();
-      return anchorMode === "bottom" ? vh - rect.bottom : rect.top;
+    ROOT.querySelector(".aive-close").onclick = () => removePanel();
+
+    ROOT.querySelector(".aive-pin").onclick = async () => {
+      pinned = !pinned;
+      ROOT.classList.toggle("aive-pinned", pinned);
+      if (pinned) setRootExpanded(true);
+      await persistPosition();
+      toast(pinned ? "Pinned" : "Unpinned");
     };
+
+    ROOT.querySelector(".aive-anchor-btn").onclick = async () => {
+      anchorMode = anchorMode === "bottom" ? "top" : "bottom";
+      ROOT.querySelector(".aive-anchor-btn").textContent = anchorMode === "bottom" ? "Bottom" : "Top";
+      await set({ [ANCHOR_KEY]: anchorMode });
+
+      // If collapsed, immediately re-dock to the chosen side
+      if (!open && !pinned) setRootExpanded(false);
+
+      await persistPosition();
+    };
+
+    ROOT.querySelector(".aive-help").onclick = () => openHelpDialog();
+    ROOT.querySelector(".aive-blacklist").onclick = () => openBlacklistDialog();
+    ROOT.querySelector(".aive-blacklist2").onclick = () => openBlacklistDialog();
+
+    ROOT.querySelector(".aive-flip").onclick = () => {
+      state.flip = !state.flip;
+      const v = ROOT.querySelector(".aive-flip")?.closest(".aive-row")?.querySelector(".aive-val");
+      if (v) v.textContent = state.flip ? "On" : "Off";
+      applyEffects();
+    };
+
+    ROOT.querySelector(".aive-body").addEventListener("input", (e) => {
+      const t = e.target;
+      if (!t || t.tagName !== "INPUT") return;
+      const k = t.getAttribute("data-key");
+      if (!k) return;
+      const v = Number(t.value);
+      if (!Number.isFinite(v)) return;
+      state[k] = v;
+      const lab = t.closest(".aive-row")?.querySelector(".aive-val");
+      if (lab) lab.textContent = formatNum(v);
+      applyEffects();
+    });
+
+    ROOT.querySelector(".aive-target-prev").onclick = () => cycleVideo(-1);
+    ROOT.querySelector(".aive-target-next").onclick = () => cycleVideo(+1);
+    ROOT.querySelector(".aive-target-auto").onclick = () => {
+      setSelectedVideo(null);
+      applyEffects();
+    };
+    ROOT.querySelector(".aive-target-selector").onclick = () => {
+      const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
+      if (v) setSelectedVideo(v);
+    };
+
+    ROOT.querySelector(".aive-auto").onclick = () => autoTune();
+    ROOT.querySelector(".aive-reset").onclick = () => resetAll();
+    ROOT.querySelector(".aive-hide").onclick = () => removePanel();
+    ROOT.querySelector(".aive-disable").onclick = () => disableThisHost();
+
+    // drag left/right from header
+    const header = ROOT.querySelector(".aive-header");
+    let dragging = false;
+    let startX = 0;
+    let startLeft = 0;
 
     header.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       if (e.target && e.target.closest && e.target.closest("button")) return;
-      draggingPanel = true;
+      dragging = true;
       header.setPointerCapture(e.pointerId);
-
       const rect = ROOT.getBoundingClientRect();
       startX = e.clientX;
-      startY = e.clientY;
       startLeft = rect.left;
-      startOffset = readOffset();
-
-      e.preventDefault();
     });
 
     header.addEventListener("pointermove", (e) => {
-      if (!draggingPanel) return;
+      if (!dragging) return;
       const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
+      const vw = window.innerWidth || 0;
       const nextLeft = startLeft + dx;
-
-      if (anchorMode === "bottom") {
-        const nextBottom = startOffset - dy;
-        const fixed = snapAndClamp(nextLeft, nextBottom, "bottom");
-        setPosition(fixed.left, fixed.bottom, "bottom");
-      } else {
-        const nextTop = startOffset + dy;
-        const fixed = snapAndClamp(nextLeft, nextTop, "top");
-        setPosition(fixed.left, fixed.top, "top");
-      }
+      const maxLeft = Math.max(EDGE, vw - ROOT.offsetWidth - EDGE);
+      ROOT.style.left = clamp(nextLeft, EDGE, maxLeft) + "px";
     });
 
-    header.addEventListener("pointerup", async (e) => {
-      if (!draggingPanel) return;
-      draggingPanel = false;
-      try { header.releasePointerCapture(e.pointerId); } catch {}
+    header.addEventListener("pointerup", async () => {
+      if (!dragging) return;
+      dragging = false;
       await persistPosition();
     });
 
     header.addEventListener("pointercancel", () => {
-      draggingPanel = false;
+      dragging = false;
     });
 
-    // Buttons
-    const pinBtn = ROOT.querySelector(".aive-pin");
-    const anchorBtn = ROOT.querySelector(".aive-anchor");
-    const blBtn = ROOT.querySelector(".aive-bl");
-    const closeBtn = ROOT.querySelector(".aive-close");
-    const flipBtn = ROOT.querySelector(".aive-flip");
-    const resetBtn = ROOT.querySelector(".aive-reset");
-    const hideBtn = ROOT.querySelector(".aive-hide");
-    const autoBtn = ROOT.querySelector(".aive-auto");
-
-    if (closeBtn) closeBtn.onclick = () => ROOT.remove();
-    if (blBtn) blBtn.onclick = () => openBlacklistDialog();
-
-    if (pinBtn) {
-      pinBtn.onclick = async () => {
-        pinned = !pinned;
-        pinBtn.style.background = pinned ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)";
-        if (pinned) {
-          open = true;
-          panel.classList.remove("aive-collapsed");
-        }
-        await persistPosition();
-        toast(pinned ? "Pinned" : "Unpinned");
-      };
-    }
-
-    if (anchorBtn) {
-      anchorBtn.onclick = async () => {
-        anchorMode = anchorMode === "bottom" ? "top" : "bottom";
-        anchorBtn.textContent = anchorMode === "bottom" ? "Bottom" : "Top";
-        await set({ [ANCHOR_KEY]: anchorMode });
-        ensureInViewHard();
-        await persistPosition();
-      };
-    }
-
-    header.addEventListener("dblclick", async (e) => {
-      if (e.target && e.target.closest && e.target.closest("button")) return;
-      anchorMode = anchorMode === "bottom" ? "top" : "bottom";
-      if (anchorBtn) anchorBtn.textContent = anchorMode === "bottom" ? "Bottom" : "Top";
-      await set({ [ANCHOR_KEY]: anchorMode });
-      ensureInViewHard();
-      await persistPosition();
+    // Auto-collapse with docking
+    let hoverTimer = 0;
+    ROOT.addEventListener("mouseenter", () => {
+      clearTimeout(hoverTimer);
+      setRootExpanded(true);
     });
 
-    if (flipBtn) {
-      flipBtn.onclick = () => {
-        state.flip = !state.flip;
-        applyEffects();
-        const lab = flipBtn.parentElement?.querySelector?.("label .aive-val");
-        if (lab) lab.textContent = state.flip ? "On" : "Off";
-      };
-    }
-
-    if (resetBtn) {
-      resetBtn.onclick = () => {
-        Object.assign(state, {
-          brightness: 1,
-          contrast: 1,
-          saturation: 1,
-          hue: 0,
-          sepia: 0,
-          sharpen: 0,
-          zoom: 1,
-          flip: false
-        });
-        zoomOrigin = { x: 50, y: 50 };
-
-        ROOT.querySelectorAll('input[type="range"]').forEach((r) => {
-          const k = r.dataset.key;
-          if (k && Object.prototype.hasOwnProperty.call(state, k)) {
-            r.value = String(state[k]);
-            const span = r.previousElementSibling?.querySelector?.(".aive-val");
-            if (span) span.textContent = formatNum(Number(r.value));
-          }
-        });
-
-        const flipLab = ROOT.querySelector(".aive-flip")?.parentElement?.querySelector?.("label .aive-val");
-        if (flipLab) flipLab.textContent = "Off";
-
-        applyEffects();
-        toast("Reset");
-      };
-    }
-
-    if (hideBtn) {
-      hideBtn.onclick = () => {
-        ROOT.remove();
-        toast("Panel hidden (reload tab to restore)");
-      };
-    }
-
-    if (autoBtn) {
-      autoBtn.onclick = () => {
-        const map = { brightness: 1.1, contrast: 1.1, saturation: 1.15 };
-        state.brightness = map.brightness;
-        state.contrast = map.contrast;
-        state.saturation = map.saturation;
-
-        for (const [k, v] of Object.entries(map)) {
-          const r = ROOT.querySelector(`input[data-key="${k}"]`);
-          if (r) {
-            r.value = String(v);
-            const span = r.previousElementSibling?.querySelector?.(".aive-val");
-            if (span) span.textContent = formatNum(v);
-          }
-        }
-
-        applyEffects();
-        toast("Auto preset applied");
-      };
-    }
-
-    // Sliders
-    ROOT.querySelectorAll('input[type="range"]').forEach((r) => {
-      r.addEventListener("input", () => {
-        const k = r.dataset.key;
-        const v = Number(r.value);
-
-        const span = r.previousElementSibling?.querySelector?.(".aive-val");
-        if (span) span.textContent = formatNum(v);
-
-        if (k && Object.prototype.hasOwnProperty.call(state, k)) {
-          state[k] = v;
-
-          if (k === "zoom" && state.zoom <= 1.0001) zoomOrigin = { x: 50, y: 50 };
-          if (k === "sharpen") updateSharpenKernel(state.sharpen);
-
-          applyEffects();
-        }
-      });
+    ROOT.addEventListener("mouseleave", () => {
+      if (pinned) return;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => setRootExpanded(false), 220);
     });
 
-    // Target video controls
-    const status = ROOT.querySelector(".aive-target-status");
+    header.addEventListener("dblclick", () => {
+      if (pinned) return;
+      setRootExpanded(!open);
+    });
 
-    function updateTargetUI() {
-      const cands = getCandidateVideos();
-      if (!cands.length) {
-        if (status) status.textContent = "No video";
-        return;
+    window.addEventListener("resize", () => {
+      ensureLeftClamped();
+      setRootExpanded(open);
+    });
+  }
+
+  // ----------------------------
+  // Quick Zoom (hold Z) – no typing
+  // ----------------------------
+  let zHeld = false;
+  let panActive = false;
+  let lastMoveTs = 0;
+
+  function suppressIfNeeded(e) {
+    if (isEditable(document.activeElement)) return false;
+    if (isEditable(e.target)) return false;
+    return true;
+  }
+
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if ((e.key === "z" || e.key === "Z") && suppressIfNeeded(e)) {
+        zHeld = true;
+        e.preventDefault();
+        e.stopPropagation();
       }
-      if (!status) return;
+      if (e.altKey && e.shiftKey && (e.key === "B" || e.key === "b")) {
+        if (ROOT && document.contains(ROOT)) {
+          e.preventDefault();
+          e.stopPropagation();
+          openBlacklistDialog();
+        }
+      }
+    },
+    true
+  );
 
-      if (videoPref.mode === "index") status.textContent = `${(videoPref.index | 0) + 1}/${cands.length}`;
-      else if (videoPref.mode === "selector") status.textContent = `Sel (${cands.length})`;
-      else status.textContent = `Auto (${cands.length})`;
-    }
+  window.addEventListener(
+    "keyup",
+    (e) => {
+      if (e.key === "z" || e.key === "Z") {
+        zHeld = false;
+        panActive = false;
+      }
+    },
+    true
+  );
 
-    const setVideoIndex = async (idx) => {
-      const cands = getCandidateVideos();
-      if (!cands.length) return;
-      const n = cands.length;
-      const next = ((Number(idx) || 0) % n + n) % n;
-      videoPref = { mode: "index", index: next };
-      await set({ [VIDEO_PREF_KEY]: videoPref });
-      updateTargetUI();
+  window.addEventListener(
+    "wheel",
+    (e) => {
+      if (!zHeld) return;
+      if (!suppressIfNeeded(e)) return;
+
+      const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
+      if (!v) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      setOriginFromPoint(v, e.clientX, e.clientY);
+
+      const dir = e.deltaY < 0 ? 1 : -1;
+      state.zoom = clamp(state.zoom + dir * 0.05, 1, 3);
       applyEffects();
-      toast(`Target: ${next + 1}/${n}`);
-    };
 
-    const prevBtn = ROOT.querySelector(".aive-target-prev");
-    const nextBtn = ROOT.querySelector(".aive-target-next");
-    const autoPickBtn = ROOT.querySelector(".aive-target-auto");
-    const selBtn = ROOT.querySelector(".aive-target-sel");
-
-    if (prevBtn) prevBtn.onclick = async () => setVideoIndex((videoPref.index || 0) - 1);
-    if (nextBtn) nextBtn.onclick = async () => setVideoIndex((videoPref.index || 0) + 1);
-
-    if (autoPickBtn) {
-      autoPickBtn.onclick = async () => {
-        videoPref = { mode: "auto", index: 0 };
-        await set({ [VIDEO_PREF_KEY]: videoPref });
-        updateTargetUI();
-        applyEffects();
-        toast("Target: Auto");
-      };
-    }
-
-    if (selBtn) {
-      selBtn.onclick = async () => {
-        const entered = prompt(
-          "CSS selector for the target <video> on this site:",
-          videoPref.mode === "selector" && videoPref.selector ? String(videoPref.selector) : "video"
-        );
-        if (entered === null) return;
-
-        const sel = String(entered).trim();
-        if (!sel) videoPref = { mode: "auto", index: 0 };
-        else videoPref = { mode: "selector", selector: sel, index: 0 };
-
-        await set({ [VIDEO_PREF_KEY]: videoPref });
-        updateTargetUI();
-        applyEffects();
-        toast(videoPref.mode === "selector" ? "Target: Selector" : "Target: Auto");
-      };
-    }
-
-    updateTargetUI();
-    const uiTimer = setInterval(() => {
-      if (!ALIVE) return clearInterval(uiTimer);
-      if (!ROOT || !ROOT.isConnected) return clearInterval(uiTimer);
-      updateTargetUI();
-    }, 1500);
-
-    requestAnimationFrame(() => {
-      ensureInViewHard();
-      const rect = ROOT.getBoundingClientRect();
-      if (
-        rect.right < 10 ||
-        rect.bottom < 10 ||
-        rect.left > window.innerWidth - 10 ||
-        rect.top > window.innerHeight - 10
-      ) {
-        setPosition(EDGE_PAD, EDGE_PAD, "bottom");
-        ensureInViewHard();
+      const zSlider = ROOT?.querySelector?.('input[data-key="zoom"]');
+      if (zSlider) {
+        zSlider.value = String(state.zoom);
+        const lab = zSlider.closest(".aive-row")?.querySelector?.(".aive-val");
+        if (lab) lab.textContent = formatNum(state.zoom);
       }
-    });
+    },
+    { passive: false, capture: true }
+  );
+
+  window.addEventListener(
+    "mousedown",
+    (e) => {
+      if (!zHeld) return;
+      if (!suppressIfNeeded(e)) return;
+
+      const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
+      if (!v) return;
+
+      if (e.button === 2) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
+      setOriginFromPoint(v, e.clientX, e.clientY);
+
+      if (e.button === 0) state.zoom = clamp(state.zoom + 0.08, 1, 3);
+      else if (e.button === 2) state.zoom = clamp(state.zoom - 0.08, 1, 3);
+      else return;
+
+      applyEffects();
+
+      const zSlider = ROOT?.querySelector?.('input[data-key="zoom"]');
+      if (zSlider) {
+        zSlider.value = String(state.zoom);
+        const lab = zSlider.closest(".aive-row")?.querySelector?.(".aive-val");
+        if (lab) lab.textContent = formatNum(state.zoom);
+      }
+
+      panActive = true;
+      lastMoveTs = now();
+    },
+    true
+  );
+
+  window.addEventListener(
+    "mousemove",
+    (e) => {
+      if (!zHeld || !panActive) return;
+
+      const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
+      if (!v) return;
+
+      const t = now();
+      if (t - lastMoveTs < 12) return;
+      lastMoveTs = t;
+
+      setOriginFromPoint(v, e.clientX, e.clientY);
+    },
+    true
+  );
+
+  window.addEventListener("mouseup", () => (panActive = false), true);
+
+  window.addEventListener(
+    "contextmenu",
+    (e) => {
+      if (zHeld && suppressIfNeeded(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+    true
+  );
+
+  // ----------------------------
+  // Observer
+  // ----------------------------
+  let obsTimer = 0;
+  function scheduleRecheck() {
+    clearTimeout(obsTimer);
+    obsTimer = setTimeout(() => {
+      if (!ALIVE) return;
+      if (!ROOT) return;
+      if (vSel && !ensureSelectedVideoStillValid()) vSel = null;
+      updateTargetStatus();
+      const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
+      if (v) applyEffects();
+    }, 220);
   }
+  const mo = new MutationObserver(() => scheduleRecheck());
 
-  async function persistPosition() {
-    if (!ROOT) return;
-
-    const rect = ROOT.getBoundingClientRect();
-    const { h: vh } = viewportSize();
-
-    const store = { pinned: !!pinned, anchor: anchorMode };
-
-    if (anchorMode === "bottom") {
-      const bottom = vh - rect.bottom;
-      store.bottom = snapAndClamp(rect.left, bottom, "bottom");
-    } else {
-      store.top = snapAndClamp(rect.left, rect.top, "top");
-    }
-
-    await set({ [POS_KEY]: store, [ANCHOR_KEY]: anchorMode });
-  }
-
-  function applySavedPosition(pos) {
-    if (!ROOT) return;
-    const defLeft = EDGE_PAD;
-
-    if (pos && pos.anchor === "top") anchorMode = "top";
-    else if (pos && pos.anchor === "bottom") anchorMode = "bottom";
-
-    pinned = !!(pos && pos.pinned);
-
-    if (anchorMode === "bottom") {
-      const saved = pos && pos.bottom ? pos.bottom : null;
-      const left = saved && Number.isFinite(saved.left) ? saved.left : defLeft;
-      const bottom = saved && Number.isFinite(saved.bottom) ? saved.bottom : EDGE_PAD;
-      const fixed = snapAndClamp(left, bottom, "bottom");
-      setPosition(fixed.left, fixed.bottom, "bottom");
-    } else {
-      const saved = pos && pos.top ? pos.top : null;
-      const left = saved && Number.isFinite(saved.left) ? saved.left : defLeft;
-      const top = saved && Number.isFinite(saved.top) ? saved.top : EDGE_PAD;
-      const fixed = snapAndClamp(left, top, "top");
-      setPosition(fixed.left, fixed.top, "top");
-    }
-  }
-
-  // ======================================================
-  // INIT
-  // ======================================================
+  // ----------------------------
+  // Boot
+  // ----------------------------
   (async () => {
-    // IMPORTANT: blacklist stops the panel, but the dialog still works via hotkey
-    if (await isBlacklisted()) return;
-
-    const vp = await get(VIDEO_PREF_KEY);
-    if (vp && typeof vp === "object") {
-      const mode = vp.mode === "index" || vp.mode === "selector" ? vp.mode : "auto";
-      videoPref = { mode, index: Number(vp.index) || 0, selector: vp.selector };
-    } else {
-      videoPref = { mode: "auto", index: 0 };
-    }
-
-    const globalAnchor = (await get(ANCHOR_KEY)) || null;
-    if (globalAnchor === "top" || globalAnchor === "bottom") anchorMode = globalAnchor;
-
-    const pos = await get(POS_KEY);
+    if (!ALIVE) return;
+    if (await isDisabledHost()) return;
+    if (await isBlacklistedHost()) return;
 
     const wait = () => {
       if (!ALIVE) return;
       if (!document.body) return requestAnimationFrame(wait);
 
       createPanel();
-      applySavedPosition(pos);
 
-      const anchorBtn = ROOT.querySelector(".aive-anchor");
-      if (anchorBtn) anchorBtn.textContent = anchorMode === "bottom" ? "Bottom" : "Top";
+      try {
+        mo.observe(document.documentElement, { childList: true, subtree: true });
+      } catch {}
 
-      const pinBtn = ROOT.querySelector(".aive-pin");
-      if (pinBtn) {
-        pinBtn.style.background = pinned ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)";
-      }
-
-      if (pinned) {
-        const panel = ROOT.querySelector(".aive-panel");
-        if (panel) panel.classList.remove("aive-collapsed");
-      }
-
-      ensureInViewHard();
-      applyEffects();
-
-      const onResize = () => ensureInViewHard();
-      window.addEventListener("resize", onResize, { passive: true });
-      window.visualViewport?.addEventListener?.("resize", onResize, { passive: true });
-
-      persistPosition();
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") scheduleRecheck();
+      });
     };
-
     wait();
   })();
 })();
