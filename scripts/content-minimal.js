@@ -1,14 +1,19 @@
+// scripts/content-minimal.js
 console.log("AIVE content script loaded", location.href);
 
 /*
   AIVE – All-in-One Video Enhancer (content-minimal.js)
 
-  Full SS1 panel + compact layout:
-  - Full height when open
-  - Collapses the WHOLE panel to header height when mouse leaves (unless pinned)
-  - Collapsed header docks to TOP/BOTTOM based on:
-      • Edge proximity (near top/bottom), otherwise
-      • Anchor button (Top/Bottom)
+  SS2 ("classic") panel:
+  - Full controls (Help, Target Video select, AutoTune/Reset/Hide, Disable Tab, Blacklist)
+  - Quick Zoom (hold Z + wheel/click/right-click/drag)
+  - Auto-collapse (unless pinned)
+  - Collapsed header docks top/bottom (edge proximity or anchor button)
+
+  Fixes:
+  - Avoid running inside typical ad iframes (small / standard ad-slot sizes) but not overly strict
+  - Auto video selection prefers visible/large player videos
+  - IMPORTANT: Do NOT bail if no video at first paint (watch DOM until video appears)
 */
 
 (() => {
@@ -19,6 +24,53 @@ console.log("AIVE content script loaded", location.href);
   let ALIVE = true;
   window.addEventListener("pagehide", () => (ALIVE = false), { once: true });
   window.addEventListener("beforeunload", () => (ALIVE = false), { once: true });
+
+  // ----------------------------
+  // Frame guard (avoid ad iframes)
+  // ----------------------------
+  function shouldRunInThisFrame() {
+    try {
+      // Main page is fine
+      if (window.top === window.self) return true;
+
+      // In an iframe: allow only if it looks like a legit embedded player
+      const fe = window.frameElement;
+      if (!fe) return false;
+
+      const r = fe.getBoundingClientRect();
+      const w = Math.round(r.width || window.innerWidth || 0);
+      const h = Math.round(r.height || window.innerHeight || 0);
+
+      // Too small to be a real player
+      if (w < 420 || h < 240) return false;
+
+      // Common ad slot sizes (tolerance +/- 10px)
+      const adSizes = [
+        [300, 250],
+        [336, 280],
+        [728, 90],
+        [970, 90],
+        [970, 250],
+        [160, 600],
+        [300, 600],
+        [320, 50],
+        [468, 60],
+        [250, 250],
+        [200, 200],
+        [180, 150],
+        [400, 300]
+      ];
+      for (const [aw, ah] of adSizes) {
+        if (Math.abs(w - aw) <= 10 && Math.abs(h - ah) <= 10) return false;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  if (!shouldRunInThisFrame()) return;
 
   const STORE =
     typeof chrome !== "undefined" &&
@@ -58,7 +110,7 @@ console.log("AIVE content script loaded", location.href);
   const DISABLED_KEY = "__aive_disabled_hosts__";
 
   let ROOT = null;
-  let open = true; // true = expanded, false = collapsed
+  let open = true; // expanded/collapsed
   let pinned = false;
   let anchorMode = "bottom"; // "top" | "bottom"
 
@@ -166,7 +218,7 @@ console.log("AIVE content script loaded", location.href);
 
   function getCandidateVideos() {
     const t = now();
-    if (t - _cachedAt < 350) return _cachedCandidates;
+    if (t - _cachedAt < 250) return _cachedCandidates;
     _cachedAt = t;
 
     const vids = Array.from(document.querySelectorAll("video"));
@@ -174,10 +226,24 @@ console.log("AIVE content script loaded", location.href);
 
     for (const v of vids) {
       try {
-        if (!v) continue;
-        if (v.closest && v.closest("#aive-root")) continue;
+        if (!v || !v.getBoundingClientRect) continue;
+
         const r = v.getBoundingClientRect();
-        if (r.width < 120 || r.height < 80) continue;
+
+        // Don’t be too strict: real players can be small-ish
+        if (r.width < 160 || r.height < 120) continue;
+
+        const cs = getComputedStyle(v);
+        if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
+
+        // Must be at least partly on screen
+        const visible =
+          r.bottom > 0 &&
+          r.right > 0 &&
+          r.top < (window.innerHeight || 0) &&
+          r.left < (window.innerWidth || 0);
+        if (!visible) continue;
+
         good.push(v);
       } catch {}
     }
@@ -191,8 +257,11 @@ console.log("AIVE content script loaded", location.href);
       const r = v.getBoundingClientRect();
       const area = Math.max(0, r.width) * Math.max(0, r.height);
       const visible = r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0;
+
+      // Prefer: biggest + ready + playing
       const readyBonus = (v.readyState || 0) >= 2 ? 1 : 0;
       const playingBonus = !v.paused ? 1 : 0;
+
       return (visible ? 1e12 : 0) + area + readyBonus * 1e8 + playingBonus * 1e7;
     } catch {
       return -1;
@@ -220,7 +289,7 @@ console.log("AIVE content script loaded", location.href);
     try {
       if (!document.contains(vSel)) return false;
       const r = vSel.getBoundingClientRect();
-      if (r.width < 80 || r.height < 60) return false;
+      if (r.width < 120 || r.height < 90) return false;
       return true;
     } catch {
       return false;
@@ -270,6 +339,7 @@ console.log("AIVE content script loaded", location.href);
 
     const sharp = clamp(state.sharpen, 0, 1);
     if (sharp > 0) {
+      // mild perceived sharpen
       filters.push(`contrast(${1 + sharp * 0.18})`);
       filters.push(`drop-shadow(0 0 ${sharp * 0.6}px rgba(255,255,255,0.14))`);
     }
@@ -467,8 +537,6 @@ console.log("AIVE content script loaded", location.href);
     return Math.max(38, Math.round(h || 44));
   }
 
-  // If you're already near an edge, collapse toward that edge.
-  // Otherwise use the anchor button (Top/Bottom).
   function getCollapseDock() {
     if (!ROOT) return anchorMode;
     const r = ROOT.getBoundingClientRect();
@@ -477,11 +545,11 @@ console.log("AIVE content script loaded", location.href);
     const distTop = r.top;
     const distBottom = Math.max(0, vh - r.bottom);
 
-    const SNAP_PX = 80; // "close to edge" threshold
+    const SNAP_PX = 80;
 
     if (distTop <= SNAP_PX && distTop <= distBottom) return "top";
     if (distBottom <= SNAP_PX && distBottom < distTop) return "bottom";
-    return anchorMode; // user-selected
+    return anchorMode;
   }
 
   function setRootExpanded(isExpanded) {
@@ -491,13 +559,11 @@ console.log("AIVE content script loaded", location.href);
     const headerH = getHeaderHeight();
 
     if (open) {
-      // Full height: stretch
       ROOT.style.top = EDGE + "px";
       ROOT.style.bottom = EDGE + "px";
       ROOT.style.height = `calc(100vh - ${EDGE * 2}px)`;
       ROOT.style.overflow = "visible";
     } else {
-      // Collapsed: dock to the correct edge
       const dock = getCollapseDock();
 
       if (dock === "bottom") {
@@ -552,7 +618,6 @@ console.log("AIVE content script loaded", location.href);
     const ab = ROOT.querySelector(".aive-anchor-btn");
     if (ab) ab.textContent = anchorMode === "bottom" ? "Bottom" : "Top";
 
-    // If pinned, always expanded
     if (pinned) setRootExpanded(true);
     else setRootExpanded(open);
   }
@@ -671,6 +736,7 @@ console.log("AIVE content script loaded", location.href);
         <div><b>Quick Zoom</b>: hold <b>Z</b> then use wheel/click/right-click/drag on the video.</div>
         <div><b>Auto-collapse</b>: collapses to header when mouse leaves (unless pinned).</div>
         <div><b>Docking</b>: collapsed header docks to top/bottom based on edge proximity or the Top/Bottom button.</div>
+        <div><b>Target Video</b>: use ◀/▶ to cycle, Sel to lock to a specific video, Auto to return to auto-pick.</div>
       </div>
     `;
     ovl.appendChild(card);
@@ -883,9 +949,7 @@ console.log("AIVE content script loaded", location.href);
     `;
 
     document.body.appendChild(ROOT);
-
     wirePanelEvents();
-
     restorePosition().then(() => {
       ensureLeftClamped();
       setRootExpanded(pinned ? true : open);
@@ -919,9 +983,7 @@ console.log("AIVE content script loaded", location.href);
       ROOT.querySelector(".aive-anchor-btn").textContent = anchorMode === "bottom" ? "Bottom" : "Top";
       await set({ [ANCHOR_KEY]: anchorMode });
 
-      // If collapsed, immediately re-dock to the chosen side
       if (!open && !pinned) setRootExpanded(false);
-
       await persistPosition();
     };
 
@@ -951,13 +1013,21 @@ console.log("AIVE content script loaded", location.href);
 
     ROOT.querySelector(".aive-target-prev").onclick = () => cycleVideo(-1);
     ROOT.querySelector(".aive-target-next").onclick = () => cycleVideo(+1);
+
     ROOT.querySelector(".aive-target-auto").onclick = () => {
       setSelectedVideo(null);
       applyEffects();
+      toast("Target: Auto");
     };
+
     ROOT.querySelector(".aive-target-selector").onclick = () => {
       const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
-      if (v) setSelectedVideo(v);
+      if (v) {
+        setSelectedVideo(v);
+        toast("Target: Selected");
+      } else {
+        toast("No video found");
+      }
     };
 
     ROOT.querySelector(".aive-auto").onclick = () => autoTune();
@@ -1095,6 +1165,13 @@ console.log("AIVE content script loaded", location.href);
     { passive: false, capture: true }
   );
 
+  function setOriginFromPoint(v, clientX, clientY) {
+    const r = v.getBoundingClientRect();
+    const ox = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
+    const oy = clamp((clientY - r.top) / Math.max(1, r.height), 0, 1);
+    v.style.transformOrigin = `${(ox * 100).toFixed(2)}% ${(oy * 100).toFixed(2)}%`;
+  }
+
   window.addEventListener(
     "mousedown",
     (e) => {
@@ -1161,44 +1238,69 @@ console.log("AIVE content script loaded", location.href);
   );
 
   // ----------------------------
-  // Observer
+  // Observer / boot (THIS is the key fix)
   // ----------------------------
+  let booted = false;
   let obsTimer = 0;
-  function scheduleRecheck() {
+
+  function tryInitPanel() {
+    if (!ALIVE || booted) return;
+    const v = pickAutoVideo();
+    if (!v) return; // keep waiting
+    vSel = v;
+    createPanel();
+    booted = true;
+    applyEffects();
+    updateTargetStatus();
+  }
+
+  function scheduleTryInit() {
     clearTimeout(obsTimer);
     obsTimer = setTimeout(() => {
       if (!ALIVE) return;
-      if (!ROOT) return;
-      if (vSel && !ensureSelectedVideoStillValid()) vSel = null;
-      updateTargetStatus();
-      const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
-      if (v) applyEffects();
-    }, 220);
+      if (!booted) {
+        tryInitPanel();
+      } else {
+        // after boot: recheck selected video validity
+        if (vSel && !ensureSelectedVideoStillValid()) vSel = null;
+        updateTargetStatus();
+        const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
+        if (v) applyEffects();
+      }
+    }, 200);
   }
-  const mo = new MutationObserver(() => scheduleRecheck());
 
-  // ----------------------------
-  // Boot
-  // ----------------------------
+  const mo = new MutationObserver(() => scheduleTryInit());
+
   (async () => {
     if (!ALIVE) return;
     if (await isDisabledHost()) return;
     if (await isBlacklistedHost()) return;
 
-    const wait = () => {
+    const waitForBody = () => {
       if (!ALIVE) return;
-      if (!document.body) return requestAnimationFrame(wait);
+      if (!document.body) return requestAnimationFrame(waitForBody);
 
-      createPanel();
-
+      // Start watching immediately (players often load late)
       try {
         mo.observe(document.documentElement, { childList: true, subtree: true });
       } catch {}
 
+      // Try now and keep trying for a bit (some sites add video without DOM mutations)
+      tryInitPanel();
+      let tries = 0;
+      const iv = setInterval(() => {
+        if (!ALIVE || booted) return clearInterval(iv);
+        tries++;
+        tryInitPanel();
+        if (tries >= 60) clearInterval(iv); // ~15 seconds
+      }, 250);
+
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") scheduleRecheck();
+        if (document.visibilityState === "visible") scheduleTryInit();
       });
     };
-    wait();
+
+    waitForBody();
   })();
 })();
