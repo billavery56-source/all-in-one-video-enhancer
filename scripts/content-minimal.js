@@ -121,7 +121,7 @@ console.log("AIVE content script loaded", location.href);
     hue: 0,
     sepia: 0,
     sharpen: 0,
-    zoom: 1,
+    zoom: 0,
     flip: false
   };
 
@@ -347,9 +347,20 @@ console.log("AIVE content script loaded", location.href);
     v.style.filter = filters.join(" ");
 
     const sx = state.flip ? -1 : 1;
-    const scale = clamp(state.zoom, 1, 3);
-    if (!v.style.transformOrigin) v.style.transformOrigin = "50% 50%";
-    v.style.transform = `scale(${scale}) scaleX(${sx})`;
+    const scale = clamp(1 + state.zoom, 1, 3);
+
+    if (!v.style.transformOrigin) {
+      v.style.transformOrigin = "50% 50%";
+    }
+
+    if (scale === 1 && sx === 1) {
+      v.style.transform = "none";
+    } else if (sx === 1) {
+      v.style.transform = `scale(${scale})`;
+    } else {
+      v.style.transform = `scale(${scale}) scaleX(${sx})`;
+    }
+
     v.style.willChange = "transform, filter";
   }
 
@@ -370,7 +381,7 @@ console.log("AIVE content script loaded", location.href);
   font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   user-select:none;
   pointer-events:auto;
-  transition: height 180ms ease;
+  transition: height 180ms ease, top 180ms ease, bottom 180ms ease;
 }
 #aive-root, #aive-root *{ box-sizing:border-box; }
 
@@ -431,8 +442,9 @@ console.log("AIVE content script loaded", location.href);
 #aive-root.aive-pinned .aive-pin{ color:#ffd36a; }
 
 #aive-root .aive-body{
-  height:100%;
-  overflow:hidden;
+  flex:1 1 auto;
+  min-height:0;
+  overflow:auto;
   padding:8px;
   display:grid;
   gap:6px;
@@ -538,17 +550,6 @@ console.log("AIVE content script loaded", location.href);
   }
 
   function getCollapseDock() {
-    if (!ROOT) return anchorMode;
-    const r = ROOT.getBoundingClientRect();
-    const vh = window.innerHeight || 0;
-
-    const distTop = r.top;
-    const distBottom = Math.max(0, vh - r.bottom);
-
-    const SNAP_PX = 80;
-
-    if (distTop <= SNAP_PX && distTop <= distBottom) return "top";
-    if (distBottom <= SNAP_PX && distBottom < distTop) return "bottom";
     return anchorMode;
   }
 
@@ -557,24 +558,23 @@ console.log("AIVE content script loaded", location.href);
 
     open = !!isExpanded;
     const headerH = getHeaderHeight();
+    const dock = open ? anchorMode : getCollapseDock();
+
+    if (dock === "bottom") {
+      ROOT.style.top = "auto";
+      ROOT.style.bottom = EDGE + "px";
+    } else {
+      ROOT.style.top = EDGE + "px";
+      ROOT.style.bottom = "auto";
+    }
 
     if (open) {
-      ROOT.style.top = EDGE + "px";
-      ROOT.style.bottom = EDGE + "px";
-      ROOT.style.height = `calc(100vh - ${EDGE * 2}px)`;
+      ROOT.style.height = "auto";
+      ROOT.style.maxHeight = `calc(100vh - ${EDGE * 2}px)`;
       ROOT.style.overflow = "visible";
     } else {
-      const dock = getCollapseDock();
-
-      if (dock === "bottom") {
-        ROOT.style.top = "auto";
-        ROOT.style.bottom = EDGE + "px";
-      } else {
-        ROOT.style.top = EDGE + "px";
-        ROOT.style.bottom = "auto";
-      }
-
       ROOT.style.height = headerH + "px";
+      ROOT.style.maxHeight = headerH + "px";
       ROOT.style.overflow = "hidden";
     }
 
@@ -666,7 +666,7 @@ console.log("AIVE content script loaded", location.href);
     state.hue = 0;
     state.sepia = 0;
     state.sharpen = 0.15;
-    state.zoom = clamp(state.zoom, 1, 3);
+    state.zoom = clamp(state.zoom, 0, 2);
     applyEffects();
     syncSlidersFromState();
     toast("Auto");
@@ -679,7 +679,7 @@ console.log("AIVE content script loaded", location.href);
     state.hue = 0;
     state.sepia = 0;
     state.sharpen = 0;
-    state.zoom = 1;
+    state.zoom = 0;
     state.flip = false;
     applyEffects();
     syncSlidersFromState();
@@ -911,7 +911,7 @@ console.log("AIVE content script loaded", location.href);
           ${slider("Hue", "hue", 0, 360, 0.5, 0)}
           ${slider("Sepia", "sepia", 0, 1, 0.01, 0)}
           ${slider("Sharpen", "sharpen", 0, 1, 0.01, 0)}
-          ${slider("Zoom", "zoom", 1, 2, 0.01, 1)}
+          ${slider("Zoom", "zoom", 0, 2, 0.01, 0)}
 
           <div class="aive-row">
             <label>Flip Horizontal <span class="aive-val">${state.flip ? "On" : "Off"}</span></label>
@@ -981,10 +981,9 @@ console.log("AIVE content script loaded", location.href);
     ROOT.querySelector(".aive-anchor-btn").onclick = async () => {
       anchorMode = anchorMode === "bottom" ? "top" : "bottom";
       ROOT.querySelector(".aive-anchor-btn").textContent = anchorMode === "bottom" ? "Bottom" : "Top";
-      await set({ [ANCHOR_KEY]: anchorMode });
-
-      if (!open && !pinned) setRootExpanded(false);
+      setRootExpanded(open);
       await persistPosition();
+      toast(anchorMode === "bottom" ? "Dock: Bottom" : "Dock: Top");
     };
 
     ROOT.querySelector(".aive-help").onclick = () => openHelpDialog();
@@ -1152,7 +1151,7 @@ console.log("AIVE content script loaded", location.href);
       setOriginFromPoint(v, e.clientX, e.clientY);
 
       const dir = e.deltaY < 0 ? 1 : -1;
-      state.zoom = clamp(state.zoom + dir * 0.05, 1, 3);
+      state.zoom = clamp(state.zoom + dir * 0.05, 0, 2);
       applyEffects();
 
       const zSlider = ROOT?.querySelector?.('input[data-key="zoom"]');
@@ -1164,13 +1163,6 @@ console.log("AIVE content script loaded", location.href);
     },
     { passive: false, capture: true }
   );
-
-  function setOriginFromPoint(v, clientX, clientY) {
-    const r = v.getBoundingClientRect();
-    const ox = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
-    const oy = clamp((clientY - r.top) / Math.max(1, r.height), 0, 1);
-    v.style.transformOrigin = `${(ox * 100).toFixed(2)}% ${(oy * 100).toFixed(2)}%`;
-  }
 
   window.addEventListener(
     "mousedown",
@@ -1188,8 +1180,8 @@ console.log("AIVE content script loaded", location.href);
 
       setOriginFromPoint(v, e.clientX, e.clientY);
 
-      if (e.button === 0) state.zoom = clamp(state.zoom + 0.08, 1, 3);
-      else if (e.button === 2) state.zoom = clamp(state.zoom - 0.08, 1, 3);
+      if (e.button === 0) state.zoom = clamp(state.zoom + 0.08, 0, 2);
+      else if (e.button === 2) state.zoom = clamp(state.zoom - 0.08, 0, 2);
       else return;
 
       applyEffects();
