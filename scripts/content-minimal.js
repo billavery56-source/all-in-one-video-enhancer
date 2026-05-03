@@ -5,7 +5,7 @@ console.log("AIVE content script loaded", location.href);
   AIVE – All-in-One Video Enhancer (content-minimal.js)
 
   SS2 ("classic") panel:
-  - Full controls (Help, Target Video select, AutoTune/Reset/Hide, Disable Tab, Blacklist)
+  - Full controls (Help, Target Video select, AutoTune/Reset/Hide, Disable Tab, List)
   - Quick Zoom (hold Z + wheel/click/right-click/drag)
   - Auto-collapse (unless pinned)
   - Collapsed header docks top/bottom (edge proximity or anchor button)
@@ -126,6 +126,33 @@ console.log("AIVE content script loaded", location.href);
   };
 
   let vSel = null;
+    const VIDEO_STYLE_CACHE = new WeakMap();
+
+  function rememberVideoInlineStyles(v) {
+    if (!v || VIDEO_STYLE_CACHE.has(v)) return;
+    VIDEO_STYLE_CACHE.set(v, {
+      filter: v.style.filter || "",
+      transform: v.style.transform || "",
+      transformOrigin: v.style.transformOrigin || "",
+      willChange: v.style.willChange || ""
+    });
+  }
+
+  function restoreVideoInlineStyles(v) {
+    if (!v) return;
+    const saved = VIDEO_STYLE_CACHE.get(v);
+    if (!saved) {
+      v.style.filter = "";
+      v.style.transform = "";
+      v.style.transformOrigin = "";
+      v.style.willChange = "";
+      return;
+    }
+    v.style.filter = saved.filter;
+    v.style.transform = saved.transform;
+    v.style.transformOrigin = saved.transformOrigin;
+    v.style.willChange = saved.willChange;
+  }
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -318,6 +345,9 @@ console.log("AIVE content script loaded", location.href);
   // Effects
   // ----------------------------
   function setOriginFromPoint(v, clientX, clientY) {
+    if (!v) return;
+    rememberVideoInlineStyles(v);
+
     const r = v.getBoundingClientRect();
     const ox = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
     const oy = clamp((clientY - r.top) / Math.max(1, r.height), 0, 1);
@@ -329,39 +359,74 @@ console.log("AIVE content script loaded", location.href);
     if (!v) return;
     if (!vSel) vSel = v;
 
-    const filters = [
-      `brightness(${state.brightness})`,
-      `contrast(${state.contrast})`,
-      `saturate(${state.saturation})`,
-      `hue-rotate(${state.hue}deg)`,
-      `sepia(${state.sepia})`
-    ];
+    rememberVideoInlineStyles(v);
 
-    const sharp = clamp(state.sharpen, 0, 1);
-    if (sharp > 0) {
-      // mild perceived sharpen
-      filters.push(`contrast(${1 + sharp * 0.18})`);
-      filters.push(`drop-shadow(0 0 ${sharp * 0.6}px rgba(255,255,255,0.14))`);
+    const hasVisualAdjustments =
+      state.brightness !== 1 ||
+      state.contrast !== 1 ||
+      state.saturation !== 1 ||
+      state.hue !== 0 ||
+      state.sepia !== 0 ||
+      state.sharpen > 0;
+
+    const hasTransformAdjustments =
+      state.zoom > 0 ||
+      state.flip;
+
+    // Restore original styles when nothing is active
+    if (!hasVisualAdjustments && !hasTransformAdjustments) {
+      restoreVideoInlineStyles(v);
+      return;
     }
 
-    v.style.filter = filters.join(" ");
+    // ----- FILTERS -----
+    if (hasVisualAdjustments) {
+      const filters = [
+        `brightness(${state.brightness})`,
+        `contrast(${state.contrast})`,
+        `saturate(${state.saturation})`,
+        `hue-rotate(${state.hue}deg)`,
+        `sepia(${state.sepia})`
+      ];
 
-    const sx = state.flip ? -1 : 1;
-    const scale = clamp(1 + state.zoom, 1, 3);
+      const sharp = clamp(state.sharpen, 0, 1);
+      if (sharp > 0) {
+        filters.push(`contrast(${1 + sharp * 0.18})`);
+        filters.push(`drop-shadow(0 0 ${sharp * 0.6}px rgba(255,255,255,0.14))`);
+      }
 
-    if (!v.style.transformOrigin) {
-      v.style.transformOrigin = "50% 50%";
-    }
-
-    if (scale === 1 && sx === 1) {
-      v.style.transform = "none";
-    } else if (sx === 1) {
-      v.style.transform = `scale(${scale})`;
+      v.style.filter = filters.join(" ");
     } else {
-      v.style.transform = `scale(${scale}) scaleX(${sx})`;
+      const saved = VIDEO_STYLE_CACHE.get(v);
+      v.style.filter = saved ? saved.filter : "";
     }
 
-    v.style.willChange = "transform, filter";
+    // ----- TRANSFORM -----
+    const saved = VIDEO_STYLE_CACHE.get(v) || {
+      transform: "",
+      transformOrigin: "",
+      willChange: ""
+    };
+
+    if (hasTransformAdjustments) {
+      const sx = state.flip ? -1 : 1;
+      const scale = clamp(1 + state.zoom, 1, 3);
+
+      if (!v.style.transformOrigin) {
+        v.style.transformOrigin = saved.transformOrigin || "50% 50%";
+      }
+
+      let extraTransform = "";
+      if (scale !== 1) extraTransform += ` scale(${scale})`;
+      if (sx === -1) extraTransform += ` scaleX(-1)`;
+
+      v.style.transform = `${saved.transform || ""}${extraTransform}`.trim();
+      v.style.willChange = "transform, filter";
+    } else {
+      v.style.transform = saved.transform || "";
+      v.style.transformOrigin = saved.transformOrigin || "";
+      v.style.willChange = hasVisualAdjustments ? "filter" : (saved.willChange || "");
+    }
   }
 
   // ----------------------------
@@ -750,126 +815,102 @@ console.log("AIVE content script loaded", location.href);
   }
 
   function openBlacklistDialog() {
-    if (!document.body) return;
-    const host = hostOf(location.href);
+  if (!document.body) return;
+  const host = hostOf(location.href);
 
-    const ovl = document.createElement("div");
-    ovl.style.cssText = `
-      position:fixed; inset:0;
-      background:rgba(0,0,0,0.55);
-      z-index:2147483647;
-      display:grid; place-items:center;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-    `;
+  const ovl = document.createElement("div");
+  ovl.style.cssText = `
+    position:fixed; inset:0;
+    background:rgba(0,0,0,0.55);
+    z-index:2147483647;
+    display:grid; place-items:center;
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  `;
 
-    const card = document.createElement("div");
-    card.style.cssText = `
-      width:min(560px, 92vw);
-      max-height:min(84vh, 900px);
-      overflow:hidden;
-      border-radius:16px;
-      border:1px solid rgba(255,255,255,0.14);
-      background:#0f1115;
-      color:#e9eef7;
-      box-shadow:0 18px 54px rgba(0,0,0,0.65);
-      display:flex; flex-direction:column;
-    `;
+  const card = document.createElement("div");
+  card.style.cssText = `
+    width:min(640px, 92vw);
+    max-height:min(88vh, 900px);
+    overflow:auto;
+    border-radius:16px;
+    border:1px solid rgba(255,255,255,0.14);
+    background:#0f1115;
+    color:#e9eef7;
+    box-shadow:0 18px 54px rgba(0,0,0,0.65);
+    display:flex;
+    flex-direction:column;
+  `;
 
-    const top = document.createElement("div");
-    top.style.cssText = `
-      padding:10px 12px;
-      display:flex; align-items:center; justify-content:space-between;
-      border-bottom:1px solid rgba(255,255,255,0.10);
-      font-weight:900;
-    `;
-    top.innerHTML = `<span>Blacklist</span><button data-x style="border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#e9eef7;border-radius:10px;padding:6px 10px;font-weight:900;cursor:pointer;">✕</button>`;
+  card.innerHTML = `
+    <div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.10);font-weight:900;">
+      <span>AIVE Lists</span>
+      <button data-x style="border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#e9eef7;border-radius:10px;padding:6px 10px;font-weight:900;cursor:pointer;">✕</button>
+    </div>
 
-    const body = document.createElement("div");
-    body.style.cssText = `padding:12px; display:grid; gap:10px;`;
+    <div style="padding:12px;display:grid;gap:12px;">
+      <div style="font-size:12px;opacity:.8;">
+        Edit these from any site where AIVE still opens. One host per line.
+      </div>
 
-    const btnRow = document.createElement("div");
-    btnRow.style.cssText = `display:flex; gap:8px; flex-wrap:wrap;`;
-    btnRow.innerHTML = `
-      <button data-add style="flex:1; min-width:180px;">Add current (${host || "unknown"})</button>
-      <button data-remove style="flex:1; min-width:180px;">Remove current</button>
-    `;
+      <button data-remove-current style="padding:10px;border-radius:12px;font-weight:900;cursor:pointer;">
+        Remove current site from BOTH lists (${host || "unknown"})
+      </button>
 
-    const ta = document.createElement("textarea");
-    ta.spellcheck = false;
-    ta.style.cssText = `
-      width:100%;
-      height:180px;
-      resize:vertical;
-      background:#171a21;
-      color:#e9eef7;
-      border:1px solid rgba(255,255,255,0.14);
-      border-radius:12px;
-      padding:10px;
-      font: 700 12px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    `;
+      <label style="font-size:12px;font-weight:900;">Blacklist</label>
+      <textarea data-blacklist spellcheck="false" style="height:150px;background:#171a21;color:#e9eef7;border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:10px;font:700 12px/1.25 ui-monospace,monospace;"></textarea>
 
-    const save = document.createElement("button");
-    save.textContent = "Save";
-    save.style.cssText = `width:100%;`;
+      <label style="font-size:12px;font-weight:900;">Disabled Sites</label>
+      <textarea data-disabled spellcheck="false" style="height:150px;background:#171a21;color:#e9eef7;border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:10px;font:700 12px/1.25 ui-monospace,monospace;"></textarea>
 
-    for (const b of [btnRow.querySelector("[data-add]"), btnRow.querySelector("[data-remove]"), save]) {
-      if (!b) continue;
-      b.style.border = "1px solid rgba(255,255,255,0.14)";
-      b.style.background = "rgba(255,255,255,0.06)";
-      b.style.color = "#e9eef7";
-      b.style.borderRadius = "12px";
-      b.style.padding = "10px 12px";
-      b.style.fontWeight = "900";
-      b.style.cursor = "pointer";
-    }
+      <button data-save style="padding:10px;border-radius:12px;font-weight:900;cursor:pointer;">Save Both Lists</button>
+    </div>
+  `;
 
-    body.appendChild(btnRow);
-    body.appendChild(ta);
-    body.appendChild(save);
+  ovl.appendChild(card);
+  document.body.appendChild(ovl);
 
-    card.appendChild(top);
-    card.appendChild(body);
-    ovl.appendChild(card);
-    document.body.appendChild(ovl);
+  const close = () => ovl.remove();
+  card.querySelector("[data-x]").onclick = close;
+  ovl.addEventListener("click", (e) => {
+    if (e.target === ovl) close();
+  });
 
-    const close = () => ovl.remove();
-    top.querySelector("[data-x]").onclick = close;
-    ovl.addEventListener("click", (e) => {
-      if (e.target === ovl) close();
-    });
+  const blTA = card.querySelector("[data-blacklist]");
+  const disTA = card.querySelector("[data-disabled]");
 
-    (async () => {
-      const list = await getList(BL_KEY);
-      ta.value = list.join("\n");
-      ta.focus();
-      ta.setSelectionRange(ta.value.length, ta.value.length);
-    })();
+  const cleanLines = (value) =>
+    value
+      .split(/\r?\n/g)
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-    btnRow.querySelector("[data-add]").onclick = async () => {
-      if (!host) return;
-      const list = await getList(BL_KEY);
-      if (!list.includes(host)) list.push(host);
-      ta.value = list.join("\n");
-      toast("Added");
-    };
+  (async () => {
+    blTA.value = (await getList(BL_KEY)).join("\n");
+    disTA.value = (await getList(DISABLED_KEY)).join("\n");
+  })();
 
-    btnRow.querySelector("[data-remove]").onclick = async () => {
-      if (!host) return;
-      const list = await getList(BL_KEY);
-      ta.value = list.filter((x) => x !== host).join("\n");
-      toast("Removed");
-    };
+  card.querySelector("[data-remove-current]").onclick = () => {
+    if (!host) return;
 
-    save.onclick = async () => {
-      const lines = ta.value
-        .split(/\r?\n/g)
-        .map((s) => s.trim())
-        .filter(Boolean);
-      await setList(BL_KEY, lines);
-      toast("Saved");
-      close();
-    };
-  }
+    const removeMatches = (x) =>
+      x !== host &&
+      x !== "chaturbate.com" &&
+      x !== "www.chaturbate.com";
+
+    blTA.value = cleanLines(blTA.value).filter(removeMatches).join("\n");
+    disTA.value = cleanLines(disTA.value).filter(removeMatches).join("\n");
+
+    toast("Removed current site from both lists");
+  };
+
+  card.querySelector("[data-save]").onclick = async () => {
+    await setList(BL_KEY, cleanLines(blTA.value));
+    await setList(DISABLED_KEY, cleanLines(disTA.value));
+
+    toast("Saved both lists");
+    close();
+  };
+}
 
   async function disableThisHost() {
     const host = hostOf(location.href);
@@ -899,7 +940,7 @@ console.log("AIVE content script loaded", location.href);
             <button class="aive-pin" type="button" title="Pin (stay open)">📌</button>
             <button class="aive-anchor-btn" type="button" title="Dock side">${anchorMode === "bottom" ? "Bottom" : "Top"}</button>
             <button class="aive-help" type="button" title="Help">?</button>
-            <button class="aive-blacklist" type="button" title="Blacklist">B</button>
+            <button class="aive-blacklist" type="button" title="Lists">B</button>
             <button class="aive-close" type="button" title="Close">✕</button>
           </span>
         </div>
@@ -941,8 +982,8 @@ console.log("AIVE content script loaded", location.href);
           </div>
 
           <div class="aive-buttons" style="grid-template-columns: 1fr 1fr; margin-top:6px;">
-            <button class="aive-disable" type="button" title="Disable AIVE on this host">Disable Tab</button>
-            <button class="aive-blacklist2" type="button" title="Manage blacklist">Blacklist</button>
+            <button class="aive-disable" type="button" title="Disable AIVE on this site">Disable Site</button>
+            <button class="aive-blacklist2" type="button" title="Manage blacklist">Lists</button>
           </div>
         </div>
       </div>
@@ -1032,7 +1073,21 @@ console.log("AIVE content script loaded", location.href);
     ROOT.querySelector(".aive-auto").onclick = () => autoTune();
     ROOT.querySelector(".aive-reset").onclick = () => resetAll();
     ROOT.querySelector(".aive-hide").onclick = () => removePanel();
-    ROOT.querySelector(".aive-disable").onclick = () => disableThisHost();
+    ROOT.querySelector(".aive-disable").onclick = () => {
+  const host = hostOf(location.href) || "this site";
+
+  const ok = confirm(
+    `Are you sure you want to disable AIVE on:\n\n${host}\n\n` +
+    `This will hide AIVE on this site until you remove it from the disabled list.`
+  );
+
+  if (!ok) {
+    toast("Disable canceled");
+    return;
+  }
+
+  disableThisHost();
+};
 
     // drag left/right from header
     const header = ROOT.querySelector(".aive-header");
@@ -1266,8 +1321,26 @@ console.log("AIVE content script loaded", location.href);
 
   (async () => {
     if (!ALIVE) return;
-    if (await isDisabledHost()) return;
-    if (await isBlacklistedHost()) return;
+    const host = hostOf(location.href);
+
+if (host === "chaturbate.com" || host.endsWith(".chaturbate.com")) {
+  await setList(
+    DISABLED_KEY,
+    (await getList(DISABLED_KEY)).filter(
+      h => h !== host && h !== "chaturbate.com" && h !== "www.chaturbate.com"
+    )
+  );
+
+  await setList(
+    BL_KEY,
+    (await getList(BL_KEY)).filter(
+      h => h !== host && h !== "chaturbate.com" && h !== "www.chaturbate.com"
+    )
+  );
+} else {
+  if (await isDisabledHost()) return;
+  if (await isBlacklistedHost()) return;
+}
 
     const waitForBody = () => {
       if (!ALIVE) return;
