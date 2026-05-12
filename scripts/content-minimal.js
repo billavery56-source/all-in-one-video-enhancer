@@ -10,10 +10,9 @@ console.log("AIVE content script loaded", location.href);
   - Auto-collapse (unless pinned)
   - Collapsed header docks top/bottom (edge proximity or anchor button)
 
-  Fixes:
-  - Avoid running inside typical ad iframes (small / standard ad-slot sizes) but not overly strict
-  - Auto video selection prefers visible/large player videos
-  - IMPORTANT: Do NOT bail if no video at first paint (watch DOM until video appears)
+  Chaturbate fix:
+  - Chaturbate live stream target is often #TheaterModePlayer, not a <video>
+  - AIVE now targets video, #TheaterModePlayer, and #chat-player
 */
 
 (() => {
@@ -25,15 +24,10 @@ console.log("AIVE content script loaded", location.href);
   window.addEventListener("pagehide", () => (ALIVE = false), { once: true });
   window.addEventListener("beforeunload", () => (ALIVE = false), { once: true });
 
-  // ----------------------------
-  // Frame guard (avoid ad iframes)
-  // ----------------------------
   function shouldRunInThisFrame() {
     try {
-      // Main page is fine
       if (window.top === window.self) return true;
 
-      // In an iframe: allow only if it looks like a legit embedded player
       const fe = window.frameElement;
       if (!fe) return false;
 
@@ -41,10 +35,8 @@ console.log("AIVE content script loaded", location.href);
       const w = Math.round(r.width || window.innerWidth || 0);
       const h = Math.round(r.height || window.innerHeight || 0);
 
-      // Too small to be a real player
       if (w < 420 || h < 240) return false;
 
-      // Common ad slot sizes (tolerance +/- 10px)
       const adSizes = [
         [300, 250],
         [336, 280],
@@ -60,6 +52,7 @@ console.log("AIVE content script loaded", location.href);
         [180, 150],
         [400, 300]
       ];
+
       for (const [aw, ah] of adSizes) {
         if (Math.abs(w - aw) <= 10 && Math.abs(h - ah) <= 10) return false;
       }
@@ -109,10 +102,12 @@ console.log("AIVE content script loaded", location.href);
   const BL_KEY = "__aive_blacklist__";
   const DISABLED_KEY = "__aive_disabled_hosts__";
 
+  const IS_CB = /(^|\.)chaturbate\.com$/i.test(location.hostname);
+
   let ROOT = null;
-  let open = true; // expanded/collapsed
+  let open = true;
   let pinned = false;
-  let anchorMode = "bottom"; // "top" | "bottom"
+  let anchorMode = "bottom";
 
   const state = {
     brightness: 1,
@@ -126,32 +121,46 @@ console.log("AIVE content script loaded", location.href);
   };
 
   let vSel = null;
-    const VIDEO_STYLE_CACHE = new WeakMap();
+  const VIDEO_STYLE_CACHE = new WeakMap();
 
   function rememberVideoInlineStyles(v) {
     if (!v || VIDEO_STYLE_CACHE.has(v)) return;
+
     VIDEO_STYLE_CACHE.set(v, {
-      filter: v.style.filter || "",
-      transform: v.style.transform || "",
-      transformOrigin: v.style.transformOrigin || "",
-      willChange: v.style.willChange || ""
+      filter: v.style.getPropertyValue("filter") || "",
+      filterPriority: v.style.getPropertyPriority("filter") || "",
+      transform: v.style.getPropertyValue("transform") || "",
+      transformPriority: v.style.getPropertyPriority("transform") || "",
+      transformOrigin: v.style.getPropertyValue("transform-origin") || "",
+      transformOriginPriority: v.style.getPropertyPriority("transform-origin") || "",
+      willChange: v.style.getPropertyValue("will-change") || "",
+      willChangePriority: v.style.getPropertyPriority("will-change") || ""
     });
+  }
+
+  function setOrRemoveStyle(el, prop, value, priority = "") {
+    if (!el) return;
+    if (value) el.style.setProperty(prop, value, priority || "");
+    else el.style.removeProperty(prop);
   }
 
   function restoreVideoInlineStyles(v) {
     if (!v) return;
+
     const saved = VIDEO_STYLE_CACHE.get(v);
+
     if (!saved) {
-      v.style.filter = "";
-      v.style.transform = "";
-      v.style.transformOrigin = "";
-      v.style.willChange = "";
+      v.style.removeProperty("filter");
+      v.style.removeProperty("transform");
+      v.style.removeProperty("transform-origin");
+      v.style.removeProperty("will-change");
       return;
     }
-    v.style.filter = saved.filter;
-    v.style.transform = saved.transform;
-    v.style.transformOrigin = saved.transformOrigin;
-    v.style.willChange = saved.willChange;
+
+    setOrRemoveStyle(v, "filter", saved.filter, saved.filterPriority);
+    setOrRemoveStyle(v, "transform", saved.transform, saved.transformPriority);
+    setOrRemoveStyle(v, "transform-origin", saved.transformOrigin, saved.transformOriginPriority);
+    setOrRemoveStyle(v, "will-change", saved.willChange, saved.willChangePriority);
   }
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -195,6 +204,7 @@ console.log("AIVE content script loaded", location.href);
         `;
         document.body.appendChild(el);
       }
+
       el.textContent = msg;
       el.style.opacity = "1";
       clearTimeout(el.__t);
@@ -220,6 +230,7 @@ console.log("AIVE content script loaded", location.href);
     const clean = (Array.isArray(list) ? list : [])
       .filter((x) => typeof x === "string" && x.trim())
       .map((x) => x.trim());
+
     await set({ [key]: clean });
   }
 
@@ -237,57 +248,72 @@ console.log("AIVE content script loaded", location.href);
     return list.includes(host);
   }
 
-  // ----------------------------
-  // Video discovery / selection
-  // ----------------------------
   let _cachedCandidates = [];
   let _cachedAt = 0;
+
+  function isVisibleTarget(el) {
+    try {
+      if (!el || !el.isConnected || !el.getBoundingClientRect) return false;
+
+      const r = el.getBoundingClientRect();
+
+      if (r.width < 120 || r.height < 90) return false;
+
+      const cs = getComputedStyle(el);
+      if (cs.display === "none") return false;
+      if (cs.visibility === "hidden") return false;
+      if (Number(cs.opacity) === 0) return false;
+
+      const visible =
+        r.bottom > 0 &&
+        r.right > 0 &&
+        r.top < (window.innerHeight || 0) &&
+        r.left < (window.innerWidth || 0);
+
+      return visible;
+    } catch {
+      return false;
+    }
+  }
 
   function getCandidateVideos() {
     const t = now();
     if (t - _cachedAt < 250) return _cachedCandidates;
     _cachedAt = t;
 
-    const vids = Array.from(document.querySelectorAll("video"));
     const good = [];
 
-    for (const v of vids) {
-      try {
-        if (!v || !v.getBoundingClientRect) continue;
+    if (IS_CB) {
+      const theater = document.querySelector("#TheaterModePlayer");
+      if (isVisibleTarget(theater)) good.push(theater);
 
-        const r = v.getBoundingClientRect();
-
-        // Don’t be too strict: real players can be small-ish
-        if (r.width < 160 || r.height < 120) continue;
-
-        const cs = getComputedStyle(v);
-        if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
-
-        // Must be at least partly on screen
-        const visible =
-          r.bottom > 0 &&
-          r.right > 0 &&
-          r.top < (window.innerHeight || 0) &&
-          r.left < (window.innerWidth || 0);
-        if (!visible) continue;
-
-        good.push(v);
-      } catch {}
+      const chatPlayer = document.querySelector("#chat-player");
+      if (isVisibleTarget(chatPlayer)) good.push(chatPlayer);
     }
 
-    _cachedCandidates = good;
-    return good;
+    const vids = Array.from(document.querySelectorAll("video"));
+    for (const v of vids) {
+      if (isVisibleTarget(v)) good.push(v);
+    }
+
+    _cachedCandidates = [...new Set(good)];
+    return _cachedCandidates;
   }
 
   function scoreVideo(v) {
     try {
+      if (!v) return -1;
+
+      if (IS_CB && v.id === "TheaterModePlayer") return 1e15;
+      if (IS_CB && v.id === "chat-player") return 9e14;
+
       const r = v.getBoundingClientRect();
       const area = Math.max(0, r.width) * Math.max(0, r.height);
       const visible = r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0;
 
-      // Prefer: biggest + ready + playing
-      const readyBonus = (v.readyState || 0) >= 2 ? 1 : 0;
-      const playingBonus = !v.paused ? 1 : 0;
+      const isVideo = String(v.tagName || "").toLowerCase() === "video";
+      const readyBonus = isVideo && (v.readyState || 0) >= 2 ? 1 : 0;
+      const playingBonus = isVideo && !v.paused ? 1 : 0;
 
       return (visible ? 1e12 : 0) + area + readyBonus * 1e8 + playingBonus * 1e7;
     } catch {
@@ -301,6 +327,7 @@ console.log("AIVE content script loaded", location.href);
 
     let best = vids[0];
     let bestScore = scoreVideo(best);
+
     for (let i = 1; i < vids.length; i++) {
       const s = scoreVideo(vids[i]);
       if (s > bestScore) {
@@ -308,19 +335,13 @@ console.log("AIVE content script loaded", location.href);
         best = vids[i];
       }
     }
+
     return best;
   }
 
   function ensureSelectedVideoStillValid() {
     if (!vSel) return false;
-    try {
-      if (!document.contains(vSel)) return false;
-      const r = vSel.getBoundingClientRect();
-      if (r.width < 120 || r.height < 90) return false;
-      return true;
-    } catch {
-      return false;
-    }
+    return isVisibleTarget(vSel);
   }
 
   function setSelectedVideo(v) {
@@ -337,13 +358,11 @@ console.log("AIVE content script loaded", location.href);
       setSelectedVideo(pickAutoVideo() || vids[0]);
       return;
     }
+
     const idx = vids.indexOf(vSel);
     setSelectedVideo(vids[(idx + dir + vids.length) % vids.length]);
   }
 
-  // ----------------------------
-  // Effects
-  // ----------------------------
   function setOriginFromPoint(v, clientX, clientY) {
     if (!v) return;
     rememberVideoInlineStyles(v);
@@ -351,14 +370,28 @@ console.log("AIVE content script loaded", location.href);
     const r = v.getBoundingClientRect();
     const ox = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
     const oy = clamp((clientY - r.top) / Math.max(1, r.height), 0, 1);
-    v.style.transformOrigin = `${(ox * 100).toFixed(2)}% ${(oy * 100).toFixed(2)}%`;
+
+    v.style.setProperty("transform-origin", `${(ox * 100).toFixed(2)}% ${(oy * 100).toFixed(2)}%`, "important");
   }
 
   function applyEffects() {
-    const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
-    if (!v) return;
-    if (!vSel) vSel = v;
+    const best = pickAutoVideo();
 
+    if (best && best !== vSel) {
+      const oldScore = vSel ? scoreVideo(vSel) : -1;
+      const newScore = scoreVideo(best);
+
+      if (!vSel || !ensureSelectedVideoStillValid() || newScore >= oldScore) {
+        if (vSel && vSel !== best) restoreVideoInlineStyles(vSel);
+        vSel = best;
+        updateTargetStatus();
+      }
+    }
+
+    const v = ensureSelectedVideoStillValid() ? vSel : best;
+    if (!v) return;
+
+    vSel = v;
     rememberVideoInlineStyles(v);
 
     const hasVisualAdjustments =
@@ -369,17 +402,13 @@ console.log("AIVE content script loaded", location.href);
       state.sepia !== 0 ||
       state.sharpen > 0;
 
-    const hasTransformAdjustments =
-      state.zoom > 0 ||
-      state.flip;
+    const hasTransformAdjustments = state.zoom > 0 || state.flip;
 
-    // Restore original styles when nothing is active
     if (!hasVisualAdjustments && !hasTransformAdjustments) {
       restoreVideoInlineStyles(v);
       return;
     }
 
-    // ----- FILTERS -----
     if (hasVisualAdjustments) {
       const filters = [
         `brightness(${state.brightness})`,
@@ -390,50 +419,74 @@ console.log("AIVE content script loaded", location.href);
       ];
 
       const sharp = clamp(state.sharpen, 0, 1);
+
       if (sharp > 0) {
         filters.push(`contrast(${1 + sharp * 0.18})`);
         filters.push(`drop-shadow(0 0 ${sharp * 0.6}px rgba(255,255,255,0.14))`);
       }
 
-      v.style.filter = filters.join(" ");
+      if (v.id === "TheaterModePlayer") {
+  v.style.setProperty("overflow", "hidden", "important");
+
+  const inner = v.querySelector("#chat-player");
+  if (inner) {
+    inner.style.setProperty("width", "100%", "important");
+    inner.style.setProperty("height", "100%", "important");
+    inner.style.setProperty("object-fit", "contain", "important");
+  }
+}
+      v.style.setProperty("filter", filters.join(" "), "important");
     } else {
       const saved = VIDEO_STYLE_CACHE.get(v);
-      v.style.filter = saved ? saved.filter : "";
+      setOrRemoveStyle(v, "filter", saved ? saved.filter : "", saved ? saved.filterPriority : "");
     }
 
-    // ----- TRANSFORM -----
     const saved = VIDEO_STYLE_CACHE.get(v) || {
       transform: "",
+      transformPriority: "",
       transformOrigin: "",
-      willChange: ""
+      transformOriginPriority: "",
+      willChange: "",
+      willChangePriority: ""
     };
 
     if (hasTransformAdjustments) {
       const sx = state.flip ? -1 : 1;
       const scale = clamp(1 + state.zoom, 1, 3);
 
-      if (!v.style.transformOrigin) {
-        v.style.transformOrigin = saved.transformOrigin || "50% 50%";
+      if (!v.style.getPropertyValue("transform-origin")) {
+        v.style.setProperty("transform-origin", saved.transformOrigin || "50% 50%", "important");
       }
 
       let extraTransform = "";
       if (scale !== 1) extraTransform += ` scale(${scale})`;
       if (sx === -1) extraTransform += ` scaleX(-1)`;
 
-      v.style.transform = `${saved.transform || ""}${extraTransform}`.trim();
-      v.style.willChange = "transform, filter";
+      const transformTarget = v.id === "TheaterModePlayer"
+  ? v.querySelector("#chat-player") || v
+  : v;
+
+rememberVideoInlineStyles(transformTarget);
+
+transformTarget.style.setProperty("transform", `${saved.transform || ""}${extraTransform}`.trim(), "important");
+transformTarget.style.setProperty("transform-origin", v.style.getPropertyValue("transform-origin") || "50% 50%", "important");
+transformTarget.style.setProperty("will-change", "transform, filter", "important");
+      v.style.setProperty("will-change", "transform, filter", "important");
     } else {
-      v.style.transform = saved.transform || "";
-      v.style.transformOrigin = saved.transformOrigin || "";
-      v.style.willChange = hasVisualAdjustments ? "filter" : (saved.willChange || "");
+      setOrRemoveStyle(v, "transform", saved.transform || "", saved.transformPriority || "");
+      setOrRemoveStyle(v, "transform-origin", saved.transformOrigin || "", saved.transformOriginPriority || "");
+
+      if (hasVisualAdjustments) {
+        v.style.setProperty("will-change", "filter", "important");
+      } else {
+        setOrRemoveStyle(v, "will-change", saved.willChange || "", saved.willChangePriority || "");
+      }
     }
   }
 
-  // ----------------------------
-  // CSS
-  // ----------------------------
   function injectStyleOnce() {
     if (document.getElementById("__aive_css__")) return;
+
     const s = document.createElement("style");
     s.id = "__aive_css__";
     s.textContent = `
@@ -441,8 +494,8 @@ console.log("AIVE content script loaded", location.href);
   position:fixed;
   left:${EDGE}px;
   top:${EDGE}px;
-  width:360px;
-  z-index:2147483646;
+  width:460px;
+  z-index:2147483647;
   font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   user-select:none;
   pointer-events:auto;
@@ -605,9 +658,6 @@ console.log("AIVE content script loaded", location.href);
     `;
   }
 
-  // ----------------------------
-  // OPEN/COLLAPSE docking logic
-  // ----------------------------
   function getHeaderHeight() {
     if (!ROOT) return 44;
     const h = ROOT.querySelector(".aive-header")?.getBoundingClientRect?.().height;
@@ -658,6 +708,7 @@ console.log("AIVE content script loaded", location.href);
   async function persistPosition() {
     if (!ROOT) return;
     const left = Math.round(ROOT.getBoundingClientRect().left);
+
     await set({
       [POS_KEY]: { left },
       [PIN_KEY]: !!pinned,
@@ -668,6 +719,7 @@ console.log("AIVE content script loaded", location.href);
 
   async function restorePosition() {
     const res = await get([POS_KEY, PIN_KEY, OPEN_KEY, ANCHOR_KEY]);
+
     pinned = !!res[PIN_KEY];
     open = res[OPEN_KEY] !== undefined ? !!res[OPEN_KEY] : true;
     anchorMode = res[ANCHOR_KEY] === "top" ? "top" : "bottom";
@@ -676,10 +728,12 @@ console.log("AIVE content script loaded", location.href);
     const left = pos && typeof pos.left === "number" ? pos.left : EDGE;
 
     if (!ROOT) return;
+
     ROOT.style.left = left + "px";
     ensureLeftClamped();
 
     ROOT.classList.toggle("aive-pinned", pinned);
+
     const ab = ROOT.querySelector(".aive-anchor-btn");
     if (ab) ab.textContent = anchorMode === "bottom" ? "Bottom" : "Top";
 
@@ -687,11 +741,9 @@ console.log("AIVE content script loaded", location.href);
     else setRootExpanded(open);
   }
 
-  // ----------------------------
-  // Target status
-  // ----------------------------
   function updateTargetStatus() {
     if (!ROOT) return;
+
     const status = ROOT.querySelector(".aive-target-status");
     const pill = ROOT.querySelector(".aive-target-pill");
     const vids = getCandidateVideos();
@@ -712,18 +764,18 @@ console.log("AIVE content script loaded", location.href);
     }
 
     const idx = vids.indexOf(vSel);
+    const tag = String(vSel.tagName || "").toLowerCase();
+    const id = vSel.id ? `#${vSel.id}` : tag;
+
     if (idx >= 0) {
-      status.textContent = `Sel ${idx + 1}/${total}`;
-      pill.textContent = `Sel ${idx + 1}/${total}`;
+      status.textContent = `${id} ${idx + 1}/${total}`;
+      pill.textContent = `${id} ${idx + 1}/${total}`;
     } else {
-      status.textContent = `Sel (${total})`;
-      pill.textContent = `Sel (${total})`;
+      status.textContent = `${id} (${total})`;
+      pill.textContent = `${id} (${total})`;
     }
   }
 
-  // ----------------------------
-  // Presets
-  // ----------------------------
   function autoTune() {
     state.brightness = 1.02;
     state.contrast = 1.08;
@@ -732,6 +784,7 @@ console.log("AIVE content script loaded", location.href);
     state.sepia = 0;
     state.sharpen = 0.15;
     state.zoom = clamp(state.zoom, 0, 2);
+
     applyEffects();
     syncSlidersFromState();
     toast("Auto");
@@ -746,6 +799,7 @@ console.log("AIVE content script loaded", location.href);
     state.sharpen = 0;
     state.zoom = 0;
     state.flip = false;
+
     applyEffects();
     syncSlidersFromState();
     toast("Reset");
@@ -753,20 +807,21 @@ console.log("AIVE content script loaded", location.href);
 
   function syncSlidersFromState() {
     if (!ROOT) return;
+
     for (const k of Object.keys(state)) {
       const inp = ROOT.querySelector(`input[data-key="${k}"]`);
       if (!inp) continue;
+
       inp.value = String(state[k]);
+
       const val = inp.closest(".aive-row")?.querySelector(".aive-val");
       if (val) val.textContent = formatNum(Number(inp.value));
     }
+
     const flipVal = ROOT.querySelector(".aive-flip")?.closest(".aive-row")?.querySelector(".aive-val");
     if (flipVal) flipVal.textContent = state.flip ? "On" : "Off";
   }
 
-  // ----------------------------
-  // Dialogs
-  // ----------------------------
   function openHelpDialog() {
     if (!document.body) return;
 
@@ -798,138 +853,144 @@ console.log("AIVE content script loaded", location.href);
         <button data-x style="border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#e9eef7;border-radius:10px;padding:6px 10px;font-weight:900;cursor:pointer;">✕</button>
       </div>
       <div style="font-size:12px;line-height:1.25;opacity:0.92;display:grid;gap:10px;">
-        <div><b>Quick Zoom</b>: hold <b>Z</b> then use wheel/click/right-click/drag on the video.</div>
-        <div><b>Auto-collapse</b>: collapses to header when mouse leaves (unless pinned).</div>
+        <div><b>Quick Zoom</b>: hold <b>Z</b> then use wheel/click/right-click/drag on the video/player.</div>
+        <div><b>Auto-collapse</b>: collapses to header when mouse leaves unless pinned.</div>
         <div><b>Docking</b>: collapsed header docks to top/bottom based on edge proximity or the Top/Bottom button.</div>
-        <div><b>Target Video</b>: use ◀/▶ to cycle, Sel to lock to a specific video, Auto to return to auto-pick.</div>
+        <div><b>Target Video</b>: use ◀/▶ to cycle, Sel to lock to a specific target, Auto to return to auto-pick.</div>
       </div>
     `;
+
     ovl.appendChild(card);
     document.body.appendChild(ovl);
 
     const close = () => ovl.remove();
     card.querySelector("[data-x]").onclick = close;
+
     ovl.addEventListener("click", (e) => {
       if (e.target === ovl) close();
     });
   }
 
   function openBlacklistDialog() {
-  if (!document.body) return;
-  const host = hostOf(location.href);
+    if (!document.body) return;
 
-  const ovl = document.createElement("div");
-  ovl.style.cssText = `
-    position:fixed; inset:0;
-    background:rgba(0,0,0,0.55);
-    z-index:2147483647;
-    display:grid; place-items:center;
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-  `;
+    const host = hostOf(location.href);
 
-  const card = document.createElement("div");
-  card.style.cssText = `
-    width:min(640px, 92vw);
-    max-height:min(88vh, 900px);
-    overflow:auto;
-    border-radius:16px;
-    border:1px solid rgba(255,255,255,0.14);
-    background:#0f1115;
-    color:#e9eef7;
-    box-shadow:0 18px 54px rgba(0,0,0,0.65);
-    display:flex;
-    flex-direction:column;
-  `;
+    const ovl = document.createElement("div");
+    ovl.style.cssText = `
+      position:fixed; inset:0;
+      background:rgba(0,0,0,0.55);
+      z-index:2147483647;
+      display:grid; place-items:center;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    `;
 
-  card.innerHTML = `
-    <div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.10);font-weight:900;">
-      <span>AIVE Lists</span>
-      <button data-x style="border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#e9eef7;border-radius:10px;padding:6px 10px;font-weight:900;cursor:pointer;">✕</button>
-    </div>
+    const card = document.createElement("div");
+    card.style.cssText = `
+      width:min(640px, 92vw);
+      max-height:min(88vh, 900px);
+      overflow:auto;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,0.14);
+      background:#0f1115;
+      color:#e9eef7;
+      box-shadow:0 18px 54px rgba(0,0,0,0.65);
+      display:flex;
+      flex-direction:column;
+    `;
 
-    <div style="padding:12px;display:grid;gap:12px;">
-      <div style="font-size:12px;opacity:.8;">
-        Edit these from any site where AIVE still opens. One host per line.
+    card.innerHTML = `
+      <div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.10);font-weight:900;">
+        <span>AIVE Lists</span>
+        <button data-x style="border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#e9eef7;border-radius:10px;padding:6px 10px;font-weight:900;cursor:pointer;">✕</button>
       </div>
 
-      <button data-remove-current style="padding:10px;border-radius:12px;font-weight:900;cursor:pointer;">
-        Remove current site from BOTH lists (${host || "unknown"})
-      </button>
+      <div style="padding:12px;display:grid;gap:12px;">
+        <div style="font-size:12px;opacity:.8;">
+          Edit these from any site where AIVE still opens. One host per line.
+        </div>
 
-      <label style="font-size:12px;font-weight:900;">Blacklist</label>
-      <textarea data-blacklist spellcheck="false" style="height:150px;background:#171a21;color:#e9eef7;border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:10px;font:700 12px/1.25 ui-monospace,monospace;"></textarea>
+        <button data-remove-current style="padding:10px;border-radius:12px;font-weight:900;cursor:pointer;">
+          Remove current site from BOTH lists (${host || "unknown"})
+        </button>
 
-      <label style="font-size:12px;font-weight:900;">Disabled Sites</label>
-      <textarea data-disabled spellcheck="false" style="height:150px;background:#171a21;color:#e9eef7;border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:10px;font:700 12px/1.25 ui-monospace,monospace;"></textarea>
+        <label style="font-size:12px;font-weight:900;">Blacklist</label>
+        <textarea data-blacklist spellcheck="false" style="height:150px;background:#171a21;color:#e9eef7;border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:10px;font:700 12px/1.25 ui-monospace,monospace;"></textarea>
 
-      <button data-save style="padding:10px;border-radius:12px;font-weight:900;cursor:pointer;">Save Both Lists</button>
-    </div>
-  `;
+        <label style="font-size:12px;font-weight:900;">Disabled Sites</label>
+        <textarea data-disabled spellcheck="false" style="height:150px;background:#171a21;color:#e9eef7;border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:10px;font:700 12px/1.25 ui-monospace,monospace;"></textarea>
 
-  ovl.appendChild(card);
-  document.body.appendChild(ovl);
+        <button data-save style="padding:10px;border-radius:12px;font-weight:900;cursor:pointer;">Save Both Lists</button>
+      </div>
+    `;
 
-  const close = () => ovl.remove();
-  card.querySelector("[data-x]").onclick = close;
-  ovl.addEventListener("click", (e) => {
-    if (e.target === ovl) close();
-  });
+    ovl.appendChild(card);
+    document.body.appendChild(ovl);
 
-  const blTA = card.querySelector("[data-blacklist]");
-  const disTA = card.querySelector("[data-disabled]");
+    const close = () => ovl.remove();
 
-  const cleanLines = (value) =>
-    value
-      .split(/\r?\n/g)
-      .map((s) => s.trim())
-      .filter(Boolean);
+    card.querySelector("[data-x]").onclick = close;
 
-  (async () => {
-    blTA.value = (await getList(BL_KEY)).join("\n");
-    disTA.value = (await getList(DISABLED_KEY)).join("\n");
-  })();
+    ovl.addEventListener("click", (e) => {
+      if (e.target === ovl) close();
+    });
 
-  card.querySelector("[data-remove-current]").onclick = () => {
-    if (!host) return;
+    const blTA = card.querySelector("[data-blacklist]");
+    const disTA = card.querySelector("[data-disabled]");
 
-    const removeMatches = (x) =>
-      x !== host &&
-      x !== "chaturbate.com" &&
-      x !== "www.chaturbate.com";
+    const cleanLines = (value) =>
+      value
+        .split(/\r?\n/g)
+        .map((s) => s.trim())
+        .filter(Boolean);
 
-    blTA.value = cleanLines(blTA.value).filter(removeMatches).join("\n");
-    disTA.value = cleanLines(disTA.value).filter(removeMatches).join("\n");
+    (async () => {
+      blTA.value = (await getList(BL_KEY)).join("\n");
+      disTA.value = (await getList(DISABLED_KEY)).join("\n");
+    })();
 
-    toast("Removed current site from both lists");
-  };
+    card.querySelector("[data-remove-current]").onclick = () => {
+      if (!host) return;
 
-  card.querySelector("[data-save]").onclick = async () => {
-    await setList(BL_KEY, cleanLines(blTA.value));
-    await setList(DISABLED_KEY, cleanLines(disTA.value));
+      const removeMatches = (x) =>
+        x !== host &&
+        x !== "chaturbate.com" &&
+        x !== "www.chaturbate.com";
 
-    toast("Saved both lists");
-    close();
-  };
-}
+      blTA.value = cleanLines(blTA.value).filter(removeMatches).join("\n");
+      disTA.value = cleanLines(disTA.value).filter(removeMatches).join("\n");
+
+      toast("Removed current site from both lists");
+    };
+
+    card.querySelector("[data-save]").onclick = async () => {
+      await setList(BL_KEY, cleanLines(blTA.value));
+      await setList(DISABLED_KEY, cleanLines(disTA.value));
+
+      toast("Saved both lists");
+      close();
+    };
+  }
 
   async function disableThisHost() {
     const host = hostOf(location.href);
     if (!host) return;
+
     const list = await getList(DISABLED_KEY);
     if (!list.includes(host)) list.push(host);
+
     await setList(DISABLED_KEY, list);
+
     toast("Disabled on this host");
     removePanel();
   }
 
-  // ----------------------------
-  // Panel HTML
-  // ----------------------------
   function createPanel() {
     injectStyleOnce();
 
     ROOT = document.createElement("div");
     ROOT.id = "aive-root";
+
     if (pinned) ROOT.classList.add("aive-pinned");
 
     ROOT.innerHTML = `
@@ -977,7 +1038,7 @@ console.log("AIVE content script loaded", location.href);
           </div>
 
           <div class="aive-helpbox">
-            Quick Zoom: hold <b>Z</b> + wheel/click/right-click/drag on video.<br>
+            Quick Zoom: hold <b>Z</b> + wheel/click/right-click/drag on video/player.<br>
             Blacklist: click <b>B</b> or press <b>Alt+Shift+B</b>.
           </div>
 
@@ -990,7 +1051,9 @@ console.log("AIVE content script loaded", location.href);
     `;
 
     document.body.appendChild(ROOT);
+
     wirePanelEvents();
+
     restorePosition().then(() => {
       ensureLeftClamped();
       setRootExpanded(pinned ? true : open);
@@ -1003,6 +1066,7 @@ console.log("AIVE content script loaded", location.href);
     try {
       ROOT?.remove();
     } catch {}
+
     ROOT = null;
   }
 
@@ -1014,7 +1078,9 @@ console.log("AIVE content script loaded", location.href);
     ROOT.querySelector(".aive-pin").onclick = async () => {
       pinned = !pinned;
       ROOT.classList.toggle("aive-pinned", pinned);
+
       if (pinned) setRootExpanded(true);
+
       await persistPosition();
       toast(pinned ? "Pinned" : "Unpinned");
     };
@@ -1022,8 +1088,10 @@ console.log("AIVE content script loaded", location.href);
     ROOT.querySelector(".aive-anchor-btn").onclick = async () => {
       anchorMode = anchorMode === "bottom" ? "top" : "bottom";
       ROOT.querySelector(".aive-anchor-btn").textContent = anchorMode === "bottom" ? "Bottom" : "Top";
+
       setRootExpanded(open);
       await persistPosition();
+
       toast(anchorMode === "bottom" ? "Dock: Bottom" : "Dock: Top");
     };
 
@@ -1033,21 +1101,29 @@ console.log("AIVE content script loaded", location.href);
 
     ROOT.querySelector(".aive-flip").onclick = () => {
       state.flip = !state.flip;
+
       const v = ROOT.querySelector(".aive-flip")?.closest(".aive-row")?.querySelector(".aive-val");
       if (v) v.textContent = state.flip ? "On" : "Off";
+
       applyEffects();
     };
 
     ROOT.querySelector(".aive-body").addEventListener("input", (e) => {
       const t = e.target;
+
       if (!t || t.tagName !== "INPUT") return;
+
       const k = t.getAttribute("data-key");
       if (!k) return;
+
       const v = Number(t.value);
       if (!Number.isFinite(v)) return;
+
       state[k] = v;
+
       const lab = t.closest(".aive-row")?.querySelector(".aive-val");
       if (lab) lab.textContent = formatNum(v);
+
       applyEffects();
     });
 
@@ -1062,35 +1138,37 @@ console.log("AIVE content script loaded", location.href);
 
     ROOT.querySelector(".aive-target-selector").onclick = () => {
       const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
+
       if (v) {
         setSelectedVideo(v);
         toast("Target: Selected");
       } else {
-        toast("No video found");
+        toast("No target found");
       }
     };
 
     ROOT.querySelector(".aive-auto").onclick = () => autoTune();
     ROOT.querySelector(".aive-reset").onclick = () => resetAll();
     ROOT.querySelector(".aive-hide").onclick = () => removePanel();
+
     ROOT.querySelector(".aive-disable").onclick = () => {
-  const host = hostOf(location.href) || "this site";
+      const host = hostOf(location.href) || "this site";
 
-  const ok = confirm(
-    `Are you sure you want to disable AIVE on:\n\n${host}\n\n` +
-    `This will hide AIVE on this site until you remove it from the disabled list.`
-  );
+      const ok = confirm(
+        `Are you sure you want to disable AIVE on:\n\n${host}\n\n` +
+          `This will hide AIVE on this site until you remove it from the disabled list.`
+      );
 
-  if (!ok) {
-    toast("Disable canceled");
-    return;
-  }
+      if (!ok) {
+        toast("Disable canceled");
+        return;
+      }
 
-  disableThisHost();
-};
+      disableThisHost();
+    };
 
-    // drag left/right from header
     const header = ROOT.querySelector(".aive-header");
+
     let dragging = false;
     let startX = 0;
     let startLeft = 0;
@@ -1098,24 +1176,30 @@ console.log("AIVE content script loaded", location.href);
     header.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       if (e.target && e.target.closest && e.target.closest("button")) return;
+
       dragging = true;
       header.setPointerCapture(e.pointerId);
+
       const rect = ROOT.getBoundingClientRect();
+
       startX = e.clientX;
       startLeft = rect.left;
     });
 
     header.addEventListener("pointermove", (e) => {
       if (!dragging) return;
+
       const dx = e.clientX - startX;
       const vw = window.innerWidth || 0;
       const nextLeft = startLeft + dx;
       const maxLeft = Math.max(EDGE, vw - ROOT.offsetWidth - EDGE);
+
       ROOT.style.left = clamp(nextLeft, EDGE, maxLeft) + "px";
     });
 
     header.addEventListener("pointerup", async () => {
       if (!dragging) return;
+
       dragging = false;
       await persistPosition();
     });
@@ -1124,8 +1208,8 @@ console.log("AIVE content script loaded", location.href);
       dragging = false;
     });
 
-    // Auto-collapse with docking
     let hoverTimer = 0;
+
     ROOT.addEventListener("mouseenter", () => {
       clearTimeout(hoverTimer);
       setRootExpanded(true);
@@ -1133,6 +1217,7 @@ console.log("AIVE content script loaded", location.href);
 
     ROOT.addEventListener("mouseleave", () => {
       if (pinned) return;
+
       clearTimeout(hoverTimer);
       hoverTimer = setTimeout(() => setRootExpanded(false), 220);
     });
@@ -1148,9 +1233,6 @@ console.log("AIVE content script loaded", location.href);
     });
   }
 
-  // ----------------------------
-  // Quick Zoom (hold Z) – no typing
-  // ----------------------------
   let zHeld = false;
   let panActive = false;
   let lastMoveTs = 0;
@@ -1169,6 +1251,7 @@ console.log("AIVE content script loaded", location.href);
         e.preventDefault();
         e.stopPropagation();
       }
+
       if (e.altKey && e.shiftKey && (e.key === "B" || e.key === "b")) {
         if (ROOT && document.contains(ROOT)) {
           e.preventDefault();
@@ -1207,11 +1290,14 @@ console.log("AIVE content script loaded", location.href);
 
       const dir = e.deltaY < 0 ? 1 : -1;
       state.zoom = clamp(state.zoom + dir * 0.05, 0, 2);
+
       applyEffects();
 
       const zSlider = ROOT?.querySelector?.('input[data-key="zoom"]');
+
       if (zSlider) {
         zSlider.value = String(state.zoom);
+
         const lab = zSlider.closest(".aive-row")?.querySelector?.(".aive-val");
         if (lab) lab.textContent = formatNum(state.zoom);
       }
@@ -1242,8 +1328,10 @@ console.log("AIVE content script loaded", location.href);
       applyEffects();
 
       const zSlider = ROOT?.querySelector?.('input[data-key="zoom"]');
+
       if (zSlider) {
         zSlider.value = String(state.zoom);
+
         const lab = zSlider.closest(".aive-row")?.querySelector?.(".aive-val");
         if (lab) lab.textContent = formatNum(state.zoom);
       }
@@ -1264,8 +1352,8 @@ console.log("AIVE content script loaded", location.href);
 
       const t = now();
       if (t - lastMoveTs < 12) return;
-      lastMoveTs = t;
 
+      lastMoveTs = t;
       setOriginFromPoint(v, e.clientX, e.clientY);
     },
     true
@@ -1284,82 +1372,130 @@ console.log("AIVE content script loaded", location.href);
     true
   );
 
-  // ----------------------------
-  // Observer / boot (THIS is the key fix)
-  // ----------------------------
   let booted = false;
   let obsTimer = 0;
+  let videoWatchdogTimer = 0;
+
+  function startVideoWatchdog() {
+    if (videoWatchdogTimer) return;
+
+    videoWatchdogTimer = setInterval(() => {
+      if (!ALIVE) {
+        clearInterval(videoWatchdogTimer);
+        videoWatchdogTimer = 0;
+        return;
+      }
+
+      _cachedAt = 0;
+
+      const best = pickAutoVideo();
+
+      if (best && best !== vSel) {
+        if (vSel) restoreVideoInlineStyles(vSel);
+        vSel = best;
+        updateTargetStatus();
+      }
+
+      if (vSel) applyEffects();
+    }, 1200);
+  }
 
   function tryInitPanel() {
-    if (!ALIVE || booted) return;
-    const v = pickAutoVideo();
-    if (!v) return; // keep waiting
+  if (!ALIVE || booted) return;
+
+  const v = pickAutoVideo();
+
+  if (v) {
     vSel = v;
-    createPanel();
-    booted = true;
-    applyEffects();
-    updateTargetStatus();
   }
+
+  createPanel();
+
+  booted = true;
+
+  applyEffects();
+  updateTargetStatus();
+  startVideoWatchdog();
+}
 
   function scheduleTryInit() {
     clearTimeout(obsTimer);
+
     obsTimer = setTimeout(() => {
       if (!ALIVE) return;
+
+      _cachedAt = 0;
+
       if (!booted) {
         tryInitPanel();
       } else {
-        // after boot: recheck selected video validity
         if (vSel && !ensureSelectedVideoStillValid()) vSel = null;
+
         updateTargetStatus();
+
         const v = ensureSelectedVideoStillValid() ? vSel : pickAutoVideo();
-        if (v) applyEffects();
+
+        if (v) {
+          vSel = v;
+          applyEffects();
+        }
       }
-    }, 200);
+    }, 120);
   }
 
   const mo = new MutationObserver(() => scheduleTryInit());
 
   (async () => {
     if (!ALIVE) return;
+
     const host = hostOf(location.href);
 
-if (host === "chaturbate.com" || host.endsWith(".chaturbate.com")) {
-  await setList(
-    DISABLED_KEY,
-    (await getList(DISABLED_KEY)).filter(
-      h => h !== host && h !== "chaturbate.com" && h !== "www.chaturbate.com"
-    )
-  );
+    if (host === "chaturbate.com" || host.endsWith(".chaturbate.com")) {
+      await setList(
+        DISABLED_KEY,
+        (await getList(DISABLED_KEY)).filter(
+          (h) => h !== host && h !== "chaturbate.com" && h !== "www.chaturbate.com"
+        )
+      );
 
-  await setList(
-    BL_KEY,
-    (await getList(BL_KEY)).filter(
-      h => h !== host && h !== "chaturbate.com" && h !== "www.chaturbate.com"
-    )
-  );
-} else {
-  if (await isDisabledHost()) return;
-  if (await isBlacklistedHost()) return;
-}
+      await setList(
+        BL_KEY,
+        (await getList(BL_KEY)).filter(
+          (h) => h !== host && h !== "chaturbate.com" && h !== "www.chaturbate.com"
+        )
+      );
+    } else {
+      if (await isDisabledHost()) return;
+      if (await isBlacklistedHost()) return;
+    }
 
     const waitForBody = () => {
       if (!ALIVE) return;
       if (!document.body) return requestAnimationFrame(waitForBody);
 
-      // Start watching immediately (players often load late)
       try {
-        mo.observe(document.documentElement, { childList: true, subtree: true });
+        mo.observe(document.body, {
+          childList: true,
+          subtree: false,
+          attributes: true,
+          attributeFilter: ["id", "class", "style", "src"]
+        });
       } catch {}
 
-      // Try now and keep trying for a bit (some sites add video without DOM mutations)
       tryInitPanel();
+
       let tries = 0;
+
       const iv = setInterval(() => {
-        if (!ALIVE || booted) return clearInterval(iv);
+        if (!ALIVE) return clearInterval(iv);
+if (booted) return;
+
         tries++;
+        _cachedAt = 0;
         tryInitPanel();
-        if (tries >= 60) clearInterval(iv); // ~15 seconds
-      }, 250);
+
+        if (tries >= 30) clearInterval(iv);
+      }, 1200);
 
       document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible") scheduleTryInit();
