@@ -128,13 +128,12 @@ console.log("AIVE content script loaded", location.href);
 
     VIDEO_STYLE_CACHE.set(v, {
       filter: v.style.getPropertyValue("filter") || "",
-      filterPriority: v.style.getPropertyPriority("filter") || "",
-      transform: v.style.getPropertyValue("transform") || "",
-      transformPriority: v.style.getPropertyPriority("transform") || "",
-      transformOrigin: v.style.getPropertyValue("transform-origin") || "",
-      transformOriginPriority: v.style.getPropertyPriority("transform-origin") || "",
+filterPriority: v.style.getPropertyPriority("filter") || "",
+transform: v.style.getPropertyValue("transform") || "",
+transformPriority: v.style.getPropertyPriority("transform") || "",
+transformOrigin: v.style.getPropertyValue("transform-origin") || "",
       willChange: v.style.getPropertyValue("will-change") || "",
-      willChangePriority: v.style.getPropertyPriority("will-change") || ""
+willChangePriority: v.style.getPropertyPriority("will-change") || ""
     });
   }
 
@@ -150,10 +149,10 @@ console.log("AIVE content script loaded", location.href);
     const saved = VIDEO_STYLE_CACHE.get(v);
 
     if (!saved) {
-      v.style.removeProperty("filter");
-      v.style.removeProperty("transform");
-      v.style.removeProperty("transform-origin");
-      v.style.removeProperty("will-change");
+      effectTarget.style.removeProperty("filter");
+      effectTarget.style.removeProperty("transform");
+      effectTarget.style.removeProperty("transform-origin");
+      effectTarget.style.removeProperty("will-change");
       return;
     }
 
@@ -366,123 +365,115 @@ console.log("AIVE content script loaded", location.href);
   function setOriginFromPoint(v, clientX, clientY) {
     if (!v) return;
     rememberVideoInlineStyles(v);
+const effectTarget =
+  v.id === "TheaterModePlayer"
+    ? v.querySelector("#chat-player") || v
+    : v;
 
+rememberVideoInlineStyles(effectTarget);
     const r = v.getBoundingClientRect();
     const ox = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
     const oy = clamp((clientY - r.top) / Math.max(1, r.height), 0, 1);
 
-    v.style.setProperty("transform-origin", `${(ox * 100).toFixed(2)}% ${(oy * 100).toFixed(2)}%`, "important");
+    effectTarget.style.setProperty("transform-origin", `${(ox * 100).toFixed(2)}% ${(oy * 100).toFixed(2)}%`, "important");
   }
 
   function applyEffects() {
-    const best = pickAutoVideo();
+  const best = pickAutoVideo();
 
-    if (best && best !== vSel) {
-      const oldScore = vSel ? scoreVideo(vSel) : -1;
-      const newScore = scoreVideo(best);
+  if (best && best !== vSel) {
+    const oldScore = vSel ? scoreVideo(vSel) : -1;
+    const newScore = scoreVideo(best);
 
-      if (!vSel || !ensureSelectedVideoStillValid() || newScore >= oldScore) {
-        if (vSel && vSel !== best) restoreVideoInlineStyles(vSel);
-        vSel = best;
-        updateTargetStatus();
-      }
+    if (!vSel || !ensureSelectedVideoStillValid() || newScore >= oldScore) {
+      if (vSel && vSel !== best) restoreVideoInlineStyles(vSel);
+      vSel = best;
+      updateTargetStatus();
+    }
+  }
+
+  const v = ensureSelectedVideoStillValid() ? vSel : best;
+  if (!v) return;
+
+  vSel = v;
+  rememberVideoInlineStyles(v);
+
+  const filterTarget = v;
+  const transformTarget =
+    v.id === "TheaterModePlayer"
+      ? v.querySelector("#chat-player") || v
+      : v;
+
+  rememberVideoInlineStyles(transformTarget);
+
+  if (v.id === "TheaterModePlayer") {
+    v.style.setProperty("overflow", "hidden", "important");
+
+    const inner = v.querySelector("#chat-player");
+    if (inner) {
+      inner.style.setProperty("width", "100%", "important");
+      inner.style.setProperty("height", "100%", "important");
+      inner.style.setProperty("object-fit", "contain", "important");
+    }
+  }
+
+  const hasVisualAdjustments =
+    state.brightness !== 1 ||
+    state.contrast !== 1 ||
+    state.saturation !== 1 ||
+    state.hue !== 0 ||
+    state.sepia !== 0 ||
+    state.sharpen > 0;
+
+  const hasTransformAdjustments = state.zoom > 0 || state.flip;
+
+  if (!hasVisualAdjustments && !hasTransformAdjustments) {
+    restoreVideoInlineStyles(filterTarget);
+    restoreVideoInlineStyles(transformTarget);
+    return;
+  }
+
+  if (hasVisualAdjustments) {
+    const filters = [
+      `brightness(${state.brightness})`,
+      `contrast(${state.contrast})`,
+      `saturate(${state.saturation})`,
+      `hue-rotate(${state.hue}deg)`,
+      `sepia(${state.sepia})`
+    ];
+
+    const sharp = clamp(state.sharpen, 0, 1);
+
+    if (sharp > 0) {
+      filters.push(`contrast(${1 + sharp * 0.18})`);
+      filters.push(`drop-shadow(0 0 ${sharp * 0.6}px rgba(255,255,255,0.14))`);
     }
 
-    const v = ensureSelectedVideoStillValid() ? vSel : best;
-    if (!v) return;
+    filterTarget.style.setProperty("filter", filters.join(" "), "important");
+    filterTarget.style.setProperty("will-change", "filter", "important");
+  } else {
+    const saved = VIDEO_STYLE_CACHE.get(filterTarget);
+    setOrRemoveStyle(filterTarget, "filter", saved ? saved.filter : "", saved ? saved.filterPriority : "");
+  }
 
-    vSel = v;
-    rememberVideoInlineStyles(v);
+  if (hasTransformAdjustments) {
+    const scale = clamp(1 + state.zoom, 1, 3);
+    const transforms = [];
 
-    const hasVisualAdjustments =
-      state.brightness !== 1 ||
-      state.contrast !== 1 ||
-      state.saturation !== 1 ||
-      state.hue !== 0 ||
-      state.sepia !== 0 ||
-      state.sharpen > 0;
+    if (state.flip) transforms.push("scaleX(-1)");
+    if (scale !== 1) transforms.push(`scale(${scale})`);
 
-    const hasTransformAdjustments = state.zoom > 0 || state.flip;
+    transformTarget.style.setProperty("transform", transforms.join(" "), "important");
+    transformTarget.style.setProperty("transform-origin", "50% 50%", "important");
+    transformTarget.style.setProperty("will-change", "transform", "important");
+  } else {
+    const saved = VIDEO_STYLE_CACHE.get(transformTarget);
 
-    if (!hasVisualAdjustments && !hasTransformAdjustments) {
-      restoreVideoInlineStyles(v);
-      return;
-    }
-
-    if (hasVisualAdjustments) {
-      const filters = [
-        `brightness(${state.brightness})`,
-        `contrast(${state.contrast})`,
-        `saturate(${state.saturation})`,
-        `hue-rotate(${state.hue}deg)`,
-        `sepia(${state.sepia})`
-      ];
-
-      const sharp = clamp(state.sharpen, 0, 1);
-
-      if (sharp > 0) {
-        filters.push(`contrast(${1 + sharp * 0.18})`);
-        filters.push(`drop-shadow(0 0 ${sharp * 0.6}px rgba(255,255,255,0.14))`);
-      }
-
-      if (v.id === "TheaterModePlayer") {
-  v.style.setProperty("overflow", "hidden", "important");
-
-  const inner = v.querySelector("#chat-player");
-  if (inner) {
-    inner.style.setProperty("width", "100%", "important");
-    inner.style.setProperty("height", "100%", "important");
-    inner.style.setProperty("object-fit", "contain", "important");
+    setOrRemoveStyle(transformTarget, "transform", saved ? saved.transform : "", saved ? saved.transformPriority : "");
+    setOrRemoveStyle(transformTarget, "transform-origin", saved ? saved.transformOrigin : "", saved ? saved.transformOriginPriority : "");
+    setOrRemoveStyle(transformTarget, "will-change", saved ? saved.willChange : "", saved ? saved.willChangePriority : "");
   }
 }
-      v.style.setProperty("filter", filters.join(" "), "important");
-    } else {
-      const saved = VIDEO_STYLE_CACHE.get(v);
-      setOrRemoveStyle(v, "filter", saved ? saved.filter : "", saved ? saved.filterPriority : "");
-    }
-
-    const saved = VIDEO_STYLE_CACHE.get(v) || {
-      transform: "",
-      transformPriority: "",
-      transformOrigin: "",
-      transformOriginPriority: "",
-      willChange: "",
-      willChangePriority: ""
-    };
-
-    if (hasTransformAdjustments) {
-      const sx = state.flip ? -1 : 1;
-      const scale = clamp(1 + state.zoom, 1, 3);
-
-      if (!v.style.getPropertyValue("transform-origin")) {
-        v.style.setProperty("transform-origin", saved.transformOrigin || "50% 50%", "important");
-      }
-
-      let extraTransform = "";
-      if (scale !== 1) extraTransform += ` scale(${scale})`;
-      if (sx === -1) extraTransform += ` scaleX(-1)`;
-
-      const transformTarget = v.id === "TheaterModePlayer"
-  ? v.querySelector("#chat-player") || v
-  : v;
-
-rememberVideoInlineStyles(transformTarget);
-
-transformTarget.style.setProperty("transform", `${saved.transform || ""}${extraTransform}`.trim(), "important");
-transformTarget.style.setProperty("transform-origin", v.style.getPropertyValue("transform-origin") || "50% 50%", "important");
-transformTarget.style.setProperty("will-change", "transform, filter", "important");
-      v.style.setProperty("will-change", "transform, filter", "important");
-    } else {
-      setOrRemoveStyle(v, "transform", saved.transform || "", saved.transformPriority || "");
-      setOrRemoveStyle(v, "transform-origin", saved.transformOrigin || "", saved.transformOriginPriority || "");
-
-      if (hasVisualAdjustments) {
-        v.style.setProperty("will-change", "filter", "important");
-      } else {
-        setOrRemoveStyle(v, "will-change", saved.willChange || "", saved.willChangePriority || "");
-      }
-    }
-  }
 
   function injectStyleOnce() {
     if (document.getElementById("__aive_css__")) return;
