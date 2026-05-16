@@ -363,20 +363,28 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
   }
 
   function setOriginFromPoint(v, clientX, clientY) {
-    if (!v) return;
-    rememberVideoInlineStyles(v);
-const effectTarget =
-  v.id === "TheaterModePlayer"
-    ? v.querySelector("#chat-player") || v
-    : v;
+  if (!v) return;
 
-rememberVideoInlineStyles(effectTarget);
-    const r = v.getBoundingClientRect();
-    const ox = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
-    const oy = clamp((clientY - r.top) / Math.max(1, r.height), 0, 1);
+  const target =
+    v.id === "TheaterModePlayer"
+      ? v.querySelector("#chat-player") || v
+      : v;
 
-    effectTarget.style.setProperty("transform-origin", `${(ox * 100).toFixed(2)}% ${(oy * 100).toFixed(2)}%`, "important");
-  }
+  rememberVideoInlineStyles(target);
+
+  const r = target.getBoundingClientRect();
+
+  const ox = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
+  const oy = clamp((clientY - r.top) / Math.max(1, r.height), 0, 1);
+
+  target.style.setProperty(
+    "transform-origin",
+    `${(ox * 100).toFixed(2)}% ${(oy * 100).toFixed(2)}%`,
+    "important"
+  );
+
+  target.dataset.aiveMouseOrigin = "1";
+}
 
   function applyEffects() {
   const best = pickAutoVideo();
@@ -464,7 +472,11 @@ rememberVideoInlineStyles(effectTarget);
     if (scale !== 1) transforms.push(`scale(${scale})`);
 
     transformTarget.style.setProperty("transform", transforms.join(" "), "important");
-    transformTarget.style.setProperty("transform-origin", "50% 50%", "important");
+    if (!transformTarget.style.getPropertyValue("transform-origin")) {
+  if (transformTarget.dataset.aiveMouseOrigin !== "1") {
+  transformTarget.style.setProperty("transform-origin", "50% 50%", "important");
+}
+}
     transformTarget.style.setProperty("will-change", "transform", "important");
   } else {
     const saved = VIDEO_STYLE_CACHE.get(transformTarget);
@@ -1229,10 +1241,8 @@ rememberVideoInlineStyles(effectTarget);
   let lastMoveTs = 0;
 
   function suppressIfNeeded(e) {
-    if (isEditable(document.activeElement)) return false;
-    if (isEditable(e.target)) return false;
-    return true;
-  }
+  return true;
+}
 
   window.addEventListener(
     "keydown",
