@@ -1241,17 +1241,23 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
   let lastMoveTs = 0;
 
   function suppressIfNeeded(e) {
+  if (isEditable(document.activeElement)) return false;
+  if (isEditable(e.target)) return false;
   return true;
 }
 
   window.addEventListener(
     "keydown",
     (e) => {
-      if ((e.key === "z" || e.key === "Z") && suppressIfNeeded(e)) {
-        zHeld = true;
-        e.preventDefault();
-        e.stopPropagation();
-      }
+      if ((e.key === "z" || e.key === "Z")) {
+  if (suppressIfNeeded(e)) {
+    zHeld = true;
+    e.preventDefault();
+    e.stopPropagation();
+  } else {
+    zHeld = false;
+  }
+}
 
       if (e.altKey && e.shiftKey && (e.key === "B" || e.key === "b")) {
         if (ROOT && document.contains(ROOT)) {
