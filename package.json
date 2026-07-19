@@ -5,7 +5,9 @@
   "description": "Asset tooling for BamaBraves brand icons used across extensions.",
   "license": "MIT",
   "scripts": {
-    "build:icons": "node scripts/export-icons.js"
+    "build:icons": "node scripts/export-icons.js",
+    "package:chrome": "powershell -ExecutionPolicy Bypass -File tools/package-webstore.ps1",
+    "package:firefox": "powershell -ExecutionPolicy Bypass -File tools/package-firefox.ps1"
   },
   "devDependencies": {
     "sharp": "^0.33.5"

@@ -6,7 +6,7 @@ console.log("AIVE content script loaded", location.href);
 
   SS2 ("classic") panel:
   - Full controls (Help, Target Video select, AutoTune/Reset/Hide, Disable Tab, List)
-  - Quick Zoom (hold Z + wheel/click/right-click/drag)
+  - Quick Zoom (hold Z + wheel/click/Shift+click/right-click/drag)
   - Auto-collapse (unless pinned)
   - Collapsed header docks top/bottom (edge proximity or anchor button)
 
@@ -26,6 +26,9 @@ console.log("AIVE content script loaded", location.href);
 
   function shouldRunInThisFrame() {
     try {
+      const params = new URLSearchParams(location.search || "");
+      if (params.get("aive_off") === "1") return false;
+
       if (window.top === window.self) return true;
 
       const fe = window.frameElement;
@@ -65,19 +68,29 @@ console.log("AIVE content script loaded", location.href);
 
   if (!shouldRunInThisFrame()) return;
 
+  const EXT =
+    typeof browser !== "undefined"
+      ? browser
+      : typeof chrome !== "undefined"
+        ? chrome
+        : null;
+
   const STORE =
-    typeof chrome !== "undefined" &&
-    chrome.storage &&
-    chrome.storage.local &&
-    typeof chrome.storage.local.get === "function"
-      ? chrome.storage.local
+    EXT &&
+    EXT.storage &&
+    EXT.storage.local &&
+    typeof EXT.storage.local.get === "function"
+      ? EXT.storage.local
       : null;
 
   const get = (keys) =>
     new Promise((resolve) => {
       if (!STORE) return resolve({});
       try {
-        STORE.get(keys, (res) => resolve(res || {}));
+        const maybePromise = STORE.get(keys, (res) => resolve(res || {}));
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then((res) => resolve(res || {})).catch(() => resolve({}));
+        }
       } catch {
         resolve({});
       }
@@ -87,7 +100,10 @@ console.log("AIVE content script loaded", location.href);
     new Promise((resolve) => {
       if (!STORE) return resolve();
       try {
-        STORE.set(obj, () => resolve());
+        const maybePromise = STORE.set(obj, () => resolve());
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(() => resolve()).catch(() => resolve());
+        }
       } catch {
         resolve();
       }
@@ -101,8 +117,11 @@ console.log("AIVE content script loaded", location.href);
   const ANCHOR_KEY = "__aive_panel_anchor__";
   const BL_KEY = "__aive_blacklist__";
   const DISABLED_KEY = "__aive_disabled_hosts__";
+  const DEFAULTS_KEY = "__aive_slider_defaults__";
+  const SLIDER_KEYS = ["brightness", "contrast", "saturation", "depth", "glare", "hue", "sepia", "sharpen", "zoom"];
 
   const IS_CB = /(^|\.)chaturbate\.com$/i.test(location.hostname);
+  const IS_AMAZON = /(^|\.)amazon\./i.test(location.hostname);
 
   let ROOT = null;
   let open = true;
@@ -113,12 +132,136 @@ console.log("AIVE content script loaded", location.href);
     brightness: 1,
     contrast: 1,
     saturation: 1,
+    depth: 0,
+    glare: 0,
     hue: 0,
     sepia: 0,
     sharpen: 0,
     zoom: 0,
     flip: false
   };
+
+  function injectSiteLayoutFixesOnce() {
+    if (!IS_AMAZON || document.getElementById("__aive_site_layout_css__")) return;
+
+    document.documentElement.classList.add("aive-amazon-wide");
+
+    const s = document.createElement("style");
+    s.id = "__aive_site_layout_css__";
+    s.textContent = `
+html.aive-amazon-wide #pageContent{
+  max-width:none !important;
+  width:100% !important;
+  overflow-x:hidden !important;
+}
+html.aive-amazon-wide #gw-layout{
+  width:100% !important;
+  max-width:none !important;
+}
+html.aive-amazon-wide #gw-card-layout{
+  max-width:none !important;
+  width:min(100%, calc(100vw - 32px)) !important;
+  margin:0 auto !important;
+  padding:20px 16px 30px !important;
+  box-sizing:border-box !important;
+  gap:16px !important;
+  justify-content:center !important;
+  align-items:stretch !important;
+}
+html.aive-amazon-wide #gw-card-layout > .gw-col{
+  margin:0 !important;
+}
+html.aive-amazon-wide #gw-card-layout .a-cardui,
+html.aive-amazon-wide #gw-card-layout [class*="card"] .a-cardui{
+  border-radius:12px !important;
+  box-shadow:0 12px 32px rgba(0,0,0,0.18) !important;
+}
+@media (min-width: 1280px){
+  html.aive-amazon-wide body:has(#s-refinements) #search{
+    max-width:none !important;
+    width:calc(100vw - 220px) !important;
+    margin-left:0 !important;
+    margin-right:0 !important;
+    box-sizing:border-box !important;
+  }
+  html.aive-amazon-wide body:has(#s-refinements) #search .s-desktop-width-max,
+  html.aive-amazon-wide body:has(#s-refinements) #search .s-desktop-content,
+  html.aive-amazon-wide body:has(#s-refinements) #search .s-main-slot{
+    max-width:none !important;
+  }
+  html.aive-amazon-wide body:has(#s-refinements) #search .s-wide-grid-style .sg-row{
+    display:flex !important;
+    flex-wrap:nowrap !important;
+    justify-content:flex-start !important;
+    align-items:flex-start !important;
+  }
+  html.aive-amazon-wide body:has(#s-refinements) #search .s-wide-grid-style .sg-row > [class*="sg-col"]:has(#s-refinements){
+    width:220px !important;
+    min-width:220px !important;
+    max-width:220px !important;
+    flex:0 0 220px !important;
+    padding-left:16px !important;
+    padding-right:10px !important;
+    box-sizing:border-box !important;
+  }
+  html.aive-amazon-wide body:has(#s-refinements) #search .s-wide-grid-style .sg-row > [class*="sg-col"]:has(#s-refinements) + [class*="sg-col"]{
+    width:calc(100vw - 440px) !important;
+    min-width:0 !important;
+    max-width:none !important;
+    flex:1 1 auto !important;
+    margin-left:0 !important;
+    padding-left:0 !important;
+    box-sizing:border-box !important;
+  }
+}
+@media (max-width: 700px){
+  html.aive-amazon-wide #gw-card-layout{
+    width:100% !important;
+    padding:14px 10px 22px !important;
+    gap:12px !important;
+  }
+}
+`;
+
+    (document.head || document.documentElement).appendChild(s);
+  }
+
+  function readSliderDefaults(value) {
+    if (!value || typeof value !== "object") return null;
+
+    const defaults = {};
+    for (const key of SLIDER_KEYS) {
+      const next = Number(value[key]);
+      if (!Number.isFinite(next)) return null;
+      defaults[key] = next;
+    }
+
+    defaults.brightness = clamp(defaults.brightness, 0, 2);
+    defaults.contrast = clamp(defaults.contrast, 0, 2);
+    defaults.saturation = clamp(defaults.saturation, 0, 2);
+    defaults.depth = clamp(defaults.depth, 0, 1);
+    defaults.glare = clamp(defaults.glare, 0, 1);
+    defaults.hue = clamp(defaults.hue, 0, 360);
+    defaults.sepia = clamp(defaults.sepia, 0, 1);
+    defaults.sharpen = clamp(defaults.sharpen, 0, 1);
+    defaults.zoom = clamp(defaults.zoom, 0, 2);
+
+    return defaults;
+  }
+
+  async function loadSliderDefaults() {
+    const res = await get([DEFAULTS_KEY]);
+    const defaults = readSliderDefaults(res[DEFAULTS_KEY]);
+    if (defaults) Object.assign(state, defaults);
+  }
+
+  async function saveSliderDefaults() {
+    const defaults = {};
+    for (const key of SLIDER_KEYS) defaults[key] = state[key];
+
+    await set({ [DEFAULTS_KEY]: defaults });
+    toast("Saved default sliders");
+  }
 
   let vSel = null;
   const VIDEO_STYLE_CACHE = new WeakMap();
@@ -132,6 +275,7 @@ filterPriority: v.style.getPropertyPriority("filter") || "",
 transform: v.style.getPropertyValue("transform") || "",
 transformPriority: v.style.getPropertyPriority("transform") || "",
 transformOrigin: v.style.getPropertyValue("transform-origin") || "",
+transformOriginPriority: v.style.getPropertyPriority("transform-origin") || "",
       willChange: v.style.getPropertyValue("will-change") || "",
 willChangePriority: v.style.getPropertyPriority("will-change") || ""
     });
@@ -149,10 +293,10 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
     const saved = VIDEO_STYLE_CACHE.get(v);
 
     if (!saved) {
-      effectTarget.style.removeProperty("filter");
-      effectTarget.style.removeProperty("transform");
-      effectTarget.style.removeProperty("transform-origin");
-      effectTarget.style.removeProperty("will-change");
+      v.style.removeProperty("filter");
+      v.style.removeProperty("transform");
+      v.style.removeProperty("transform-origin");
+      v.style.removeProperty("will-change");
       return;
     }
 
@@ -429,6 +573,8 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
     state.brightness !== 1 ||
     state.contrast !== 1 ||
     state.saturation !== 1 ||
+    state.depth > 0 ||
+    state.glare > 0 ||
     state.hue !== 0 ||
     state.sepia !== 0 ||
     state.sharpen > 0;
@@ -442,10 +588,18 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
   }
 
   if (hasVisualAdjustments) {
+    const depth = clamp(state.depth, 0, 1);
+    const depthBrightness = 1 - depth * 0.16;
+    const depthContrast = 1 + depth * 0.34;
+    const glare = clamp(state.glare, 0, 1);
+    const glareBrightness = 1 - glare * 0.28;
+    const glareContrast = 1 - glare * 0.18;
+    const glareSaturation = 1 - glare * 0.08;
+
     const filters = [
-      `brightness(${state.brightness})`,
-      `contrast(${state.contrast})`,
-      `saturate(${state.saturation})`,
+      `brightness(${state.brightness * depthBrightness * glareBrightness})`,
+      `contrast(${state.contrast * depthContrast * glareContrast})`,
+      `saturate(${state.saturation * glareSaturation})`,
       `hue-rotate(${state.hue}deg)`,
       `sepia(${state.sepia})`
     ];
@@ -781,8 +935,10 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
 
   function autoTune() {
     state.brightness = 1.02;
-    state.contrast = 1.08;
+    state.contrast = 1.06;
     state.saturation = 1.06;
+    state.depth = 0.18;
+    state.glare = 0.12;
     state.hue = 0;
     state.sepia = 0;
     state.sharpen = 0.15;
@@ -797,6 +953,8 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
     state.brightness = 1;
     state.contrast = 1;
     state.saturation = 1;
+    state.depth = 0;
+    state.glare = 0;
     state.hue = 0;
     state.sepia = 0;
     state.sharpen = 0;
@@ -856,7 +1014,7 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
         <button data-x style="border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.06);color:#e9eef7;border-radius:10px;padding:6px 10px;font-weight:900;cursor:pointer;">✕</button>
       </div>
       <div style="font-size:12px;line-height:1.25;opacity:0.92;display:grid;gap:10px;">
-        <div><b>Quick Zoom</b>: hold <b>Z</b> then use wheel/click/right-click/drag on the video/player.</div>
+        <div><b>Quick Zoom</b>: hold <b>Z</b> then left-click to zoom in, Shift+left-click or right-click to zoom out, or use wheel/drag on the video/player.</div>
         <div><b>Auto-collapse</b>: collapses to header when mouse leaves unless pinned.</div>
         <div><b>Docking</b>: collapsed header docks to top/bottom based on edge proximity or the Top/Bottom button.</div>
         <div><b>Target Video</b>: use ◀/▶ to cycle, Sel to lock to a specific target, Auto to return to auto-pick.</div>
@@ -1010,13 +1168,15 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
         </div>
 
         <div class="aive-body">
-          ${slider("Brightness", "brightness", 0, 2, 0.01, 1)}
-          ${slider("Contrast", "contrast", 0, 2, 0.01, 1)}
-          ${slider("Saturation", "saturation", 0, 2, 0.01, 1)}
-          ${slider("Hue", "hue", 0, 360, 0.5, 0)}
-          ${slider("Sepia", "sepia", 0, 1, 0.01, 0)}
-          ${slider("Sharpen", "sharpen", 0, 1, 0.01, 0)}
-          ${slider("Zoom", "zoom", 0, 2, 0.01, 0)}
+          ${slider("Brightness", "brightness", 0, 2, 0.01, state.brightness)}
+          ${slider("Contrast", "contrast", 0, 2, 0.01, state.contrast)}
+          ${slider("Saturation", "saturation", 0, 2, 0.01, state.saturation)}
+          ${slider("Depth", "depth", 0, 1, 0.01, state.depth)}
+          ${slider("Glare", "glare", 0, 1, 0.01, state.glare)}
+          ${slider("Hue", "hue", 0, 360, 0.5, state.hue)}
+          ${slider("Sepia", "sepia", 0, 1, 0.01, state.sepia)}
+          ${slider("Sharpen", "sharpen", 0, 1, 0.01, state.sharpen)}
+          ${slider("Zoom", "zoom", 0, 2, 0.01, state.zoom)}
 
           <div class="aive-row">
             <label>Flip Horizontal <span class="aive-val">${state.flip ? "On" : "Off"}</span></label>
@@ -1034,14 +1194,15 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
             </div>
           </div>
 
-          <div class="aive-buttons">
+          <div class="aive-buttons" style="grid-template-columns: 1fr 1fr;">
             <button class="aive-auto" type="button" title="Auto Tune">Auto</button>
+            <button class="aive-save-default" type="button" title="Save current slider settings as default">Save as default</button>
             <button class="aive-reset" type="button" title="Reset">Reset</button>
             <button class="aive-hide" type="button" title="Hide Tab">Hide Tab</button>
           </div>
 
           <div class="aive-helpbox">
-            Quick Zoom: hold <b>Z</b> + wheel/click/right-click/drag on video/player.<br>
+            Quick Zoom: hold <b>Z</b> + left-click to zoom in, Shift+left-click or right-click to zoom out.<br>
             Blacklist: click <b>B</b> or press <b>Alt+Shift+B</b>.
           </div>
 
@@ -1151,6 +1312,7 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
     };
 
     ROOT.querySelector(".aive-auto").onclick = () => autoTune();
+    ROOT.querySelector(".aive-save-default").onclick = () => saveSliderDefaults();
     ROOT.querySelector(".aive-reset").onclick = () => resetAll();
     ROOT.querySelector(".aive-hide").onclick = () => removePanel();
 
@@ -1260,7 +1422,7 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
 }
 
       if (e.altKey && e.shiftKey && (e.key === "B" || e.key === "b")) {
-        if (ROOT && document.contains(ROOT)) {
+        if (document.body) {
           e.preventDefault();
           e.stopPropagation();
           openBlacklistDialog();
@@ -1269,6 +1431,14 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
     },
     true
   );
+
+  if (EXT && EXT.runtime && EXT.runtime.onMessage) {
+    EXT.runtime.onMessage.addListener((msg) => {
+      if (msg && msg.type === "AIVE_OPEN_BLACKLIST_DIALOG" && document.body) {
+        openBlacklistDialog();
+      }
+    });
+  }
 
   window.addEventListener(
     "keyup",
@@ -1328,7 +1498,7 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
 
       setOriginFromPoint(v, e.clientX, e.clientY);
 
-      if (e.button === 0) state.zoom = clamp(state.zoom + 0.08, 0, 2);
+      if (e.button === 0) state.zoom = clamp(state.zoom + (e.shiftKey ? -0.08 : 0.08), 0, 2);
       else if (e.button === 2) state.zoom = clamp(state.zoom - 0.08, 0, 2);
       else return;
 
@@ -1476,9 +1646,13 @@ willChangePriority: v.style.getPropertyPriority("will-change") || ""
       if (await isBlacklistedHost()) return;
     }
 
+    await loadSliderDefaults();
+
     const waitForBody = () => {
       if (!ALIVE) return;
       if (!document.body) return requestAnimationFrame(waitForBody);
+
+      injectSiteLayoutFixesOnce();
 
       try {
         mo.observe(document.body, {

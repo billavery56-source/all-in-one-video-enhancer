@@ -1,0 +1,72 @@
+{
+  "manifest_version": 3,
+  "name": "All-in-One Video Enhancer (AIVE)",
+  "version": "1.0.4",
+  "description": "Video filters, glare/depth controls, and reliable quick-zoom (hold Z) on HTML5 video.",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "AIVE",
+    "default_icon": {
+      "16": "icons/brand-16.png",
+      "32": "icons/brand-32.png",
+      "48": "icons/brand-48.png"
+    }
+  },
+  "background": {
+    "scripts": [
+      "sw.js"
+    ]
+  },
+  "commands": {
+    "aive_open_blacklist": {
+      "suggested_key": {
+        "default": "Alt+Shift+B"
+      },
+      "description": "Open AIVE Blacklist Manager"
+    }
+  },
+  "icons": {
+    "16": "icons/brand-16.png",
+    "32": "icons/brand-32.png",
+    "48": "icons/brand-48.png",
+    "128": "icons/brand-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "scripts/content-minimal.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true,
+      "exclude_matches": [
+        "*://chatgpt.com/*",
+        "*://*.chatgpt.com/*",
+        "*://chat.openai.com/*"
+      ]
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "aive@billabyte.local",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
+    }
+  }
+}

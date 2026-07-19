@@ -1,90 +1,75 @@
 # All-in-One Video Enhancer (AIVE)
 
-A floating, on-page control panel for **any HTML5 video**. Tweak the picture with CSS filters (brightness/contrast/saturation/**hue**/sepia), zoom in, flip horizontally, and use **Auto** to smart-tune.
+AIVE adds a floating, on-page control panel for HTML5 video. Use it to tune picture quality, reduce harsh glare, zoom into detail, flip video horizontally, and quickly disable the tool on sites where you do not want it running.
 
 ## Features
 
-- On-page floating panel with sliders for:
+- Picture sliders:
   - Brightness
   - Contrast
   - Saturation
-  - **Hue (0–360° wrap, 0.5° steps)**
+  - Depth, for washed-out videos with lifted blacks
+  - Glare, for overexposed videos with blown highlights
+  - Hue
   - Sepia
+  - Sharpen
   - Zoom
-- Layout / behavior controls:
-  - **Anchor** the panel to the **Top** or **Bottom** of the viewport
-  - **Pin** to keep the panel expanded (otherwise it can auto-collapse)
-  - Tune auto-collapse feel with **Animation Speed**, **Blind Weight**, and **Collapse Delay**
-- One-click actions:
-  - **Auto**: samples the current video frame (when allowed) and adjusts the picture
-  - **Reset**: returns sliders to defaults
-  - **Flip Horizontal**: mirror the video
-- Built-in help:
-  - Blue **?** opens a centered help dialog with quick, readable tips
-- Per-site blacklist:
-  - Disable AIVE on sites where you never want it running
+- Quick Zoom: hold `Z` and use the mouse wheel, left-click to zoom in, Shift+left-click or right-click to zoom out, or drag over the video/player.
+- Auto tune: applies a balanced starter setting, including a light depth boost.
+- Save as default: stores the current slider values for future pages.
+- Target video controls for pages with more than one player.
+- Per-site disabled list and blacklist manager.
+- Panel docking, pinning, dragging, and auto-collapse.
 
-### Notes on Auto
+## Why Depth Exists
 
-Some videos can’t be sampled due to browser security rules (cross-origin / DRM). If sampling is blocked, Auto will fall back gracefully (it won’t crash the page).
+Some videos look washed out because the dark parts of the image are lifted toward gray. Saturation does not fix that because it only changes color intensity. AIVE's Depth slider combines a subtle brightness reduction with extra contrast to restore darker shadows and make the picture feel less flat.
+
+## Why Glare Exists
+
+Some videos are overexposed, especially in bright outdoor backgrounds. In those cases, the image is not just flat; the highlights are too hot. AIVE's Glare slider lowers brightness, softens contrast, and slightly calms saturation so harsh white/yellow areas are easier to look at.
 
 ## Keyboard Shortcuts
 
-- **Alt+Shift+B** — Open the **Blacklist Manager** (also configurable at `chrome://extensions/shortcuts`)
+- `Alt+Shift+B`: open the AIVE Lists dialog. This can also be changed at `chrome://extensions/shortcuts`.
 
-## Install (Chrome/Edge)
+## Firefox and Android Notes
 
-1. Open `chrome://extensions` (Edge: `edge://extensions`).
-2. Enable **Developer mode**.
-3. Click **Load unpacked** and select the `all-in-one-video-enhancer` folder.
-4. (Optional) Pin the AIVE extension icon to your toolbar.
+AIVE includes a Firefox package path for testing. Build it with:
 
-## Usage
+```powershell
+.\tools\package-firefox.ps1
+```
 
-### Basic
+The Firefox package uses `manifest.firefox.json`, which adds Firefox-specific settings and opts into Firefox for Android availability metadata. Desktop Firefox is the first compatibility target.
 
-1. Open a page with an HTML5 `<video>` element.
-2. AIVE injects automatically (unless the site is blacklisted).
-3. Use the on-page panel to adjust the picture.
+Firefox for Android is experimental for AIVE. The extension's core video filters are content-script based and may work, but some controls are desktop-first:
 
-### Panel (on-page UI)
+- `Z` + click, Shift+click, right-click, mouse wheel, and hover behavior depend on desktop input.
+- Phone use will need larger touch controls for quick zoom and panel handling.
+- Some Firefox for Android extension APIs may differ from desktop Firefox.
 
-- Use sliders to adjust **brightness**, **contrast**, **saturation**, **hue**, **sepia**, and **zoom**.
-- Use **Anchor** to stick the panel to the top/bottom of your viewport.
-- Use **Flip** to mirror the video horizontally.
-- Click **Auto** to smart-tune the image.
-- Click **Reset** to return everything to defaults.
-- Drag the **AIVE** header to move the panel.
-- Use the **📌 pin** to keep the panel expanded (otherwise it may collapse when idle).
-- Click the blue **?** for the built-in help dialog.
-
-### Blacklist Manager
-
-- Press **Alt+Shift+B** to open the blacklist dialog.
-- Add or remove domains to control where AIVE runs.
+For Android testing, start with the Firefox package, then install or load it in Firefox for Android and verify basic slider controls before relying on quick-zoom gestures.
 
 ## What AIVE Stores
 
-AIVE uses `chrome.storage.local` for a few small settings:
+AIVE uses the browser's local extension storage for local settings only:
 
-- `aive_blacklist` — array of hostnames where AIVE is disabled
-- `aive_pos_<hostname>` — saved panel position for that site
-- `aive_anchor_mode` — your preferred anchor mode (top/bottom)
+- slider defaults
+- panel position, open state, pin state, and dock side
+- disabled-site and blacklist hostnames
+
+These settings stay in the browser's local extension storage.
 
 ## Permissions
 
-- `storage` — save blacklist + panel position/anchor
-- `activeTab` — talk to the currently active tab when you use the shortcut
-- `scripting` — allows MV3 scripts to interact as needed
-- `host_permissions: ["<all_urls>"]` — lets the content script run on pages with videos
+- `storage`: saves local settings.
+- `activeTab`: lets the extension command message the active tab.
+- `host_permissions: ["<all_urls>"]`: lets AIVE find and enhance videos on pages you visit.
 
 ## Implementation Notes
 
-AIVE applies effects via CSS:
+AIVE applies effects with CSS filters and transforms:
 
-- `filter:` brightness/contrast/saturate/**hue-rotate**/sepia
-- `transform:` scale (zoom) + optional horizontal flip
-
-## Branding (BamaBraves)
-
-Icons live in `icons/` and are referenced by `manifest.json`.
+- `filter`: brightness, contrast, saturate, hue-rotate, sepia, and a sharpen-style contrast/drop-shadow boost
+- `transform`: zoom and optional horizontal flip
